@@ -1,4 +1,4 @@
-# UMIL and VideoMAE Experiment for Video Anomaly Detection
+# UMIL and VideoMAE Experiment for Detecting The Type Of Video Anomaly
 
 This repository is a research and practice project focused on Detecting The Type Of Video Anomaly using UMIL and VideoMAE.
 
