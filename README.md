@@ -1,0 +1,1 @@
+# Detecting-The-Type-Of-Video-Anomaly
