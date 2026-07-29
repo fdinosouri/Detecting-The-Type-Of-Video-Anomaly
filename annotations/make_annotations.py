@@ -63,11 +63,20 @@ def main():
         test_names = set()
         with open(args.test_split, "r", encoding="utf-8") as f:
             for line in f:
-                name = line.strip().replace("\\", "/").rsplit("/", 1)[-1]
-                if name:
-                    test_names.add(name)
+                # first token only, so files with extra columns (e.g. the
+                # temporal annotation file) work too; match by basename
+                tokens = line.split()
+                if not tokens:
+                    continue
+                test_names.add(tokens[0].replace("\\", "/").rsplit("/", 1)[-1])
         train = [(p, l) for p, l in labeled if Path(p).name not in test_names]
         test = [(p, l) for p, l in labeled if Path(p).name in test_names]
+        if not test:
+            raise SystemExit(
+                f"No video from {root} matched the names in {args.test_split}. "
+                "Check that the split file lists the same file names as the "
+                "dataset, or use --test-ratio instead."
+            )
     else:
         rng = random.Random(args.seed)
         by_class = defaultdict(list)

@@ -9,8 +9,8 @@
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
             "args": [
-                "--root", "D:/datasets/UCF_Crime",
-                "--test-split", "D:/datasets/UCF_Crime/Anomaly_Detection_splits/Anomaly_Test.txt"
+                "--root", "D:/dataset",
+                "--test-split", "D:/dataset/UCF_Crimes-Train-Test-Split/Anomaly_Detection_splits/Anomaly_Test.txt"
             ]
         },
         {
