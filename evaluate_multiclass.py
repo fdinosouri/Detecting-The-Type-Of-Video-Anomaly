@@ -17,11 +17,11 @@ from pathlib import Path
 
 import torch
 import yaml
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
 
 from videomae_multiclass.dataset import VideoClipDataset
 from videomae_multiclass.inference import predict_dataset
-from videomae_multiclass.labels import CLASSES, NUM_CLASSES
+from videomae_multiclass.labels import CLASSES, NORMAL_INDEX, NUM_CLASSES
 from videomae_multiclass.model import build_model
 
 
@@ -65,12 +65,19 @@ def main():
     total = len(labels)
     accuracy = correct / total
 
+    binary_true = [int(t != NORMAL_INDEX) for t in labels]
+    binary_auc = None
+    if 0 < sum(binary_true) < total:
+        binary_auc = roc_auc_score(binary_true, anomaly_scores)
+
     print("=" * 70)
     print(f"Matched Videos: {total}")
     print(f"Multiclass Accuracy: {accuracy:.4f}")
     print(f"Multiclass Accuracy Percent: {accuracy * 100:.2f}%")
     print(f"Correct Predictions: {correct}")
     print(f"Total Predictions: {total}")
+    if binary_auc is not None:
+        print(f"Binary ROC-AUC (Normal vs Anomaly): {binary_auc:.4f}")
     print("=" * 70)
     print("\nClassification Report:\n")
     print(
