@@ -1,0 +1,48 @@
+# VideoMAE fine-tuning on UCF-Crime, 14-class anomaly-type classification.
+
+output_dir: checkpoints
+
+data:
+  # Root folder that contains Anomaly-Videos-Part-*/ and *Normal-Videos*/
+  root: /path/to/UCF_Crime
+  train_list: annotations/train.txt
+  test_list: annotations/test.txt
+  num_frames: 16        # must stay 16 for the pretrained VideoMAE checkpoints
+  sampling_rate: 4      # temporal stride between sampled frames
+  crop_size: 224
+  short_side: 256
+
+model:
+  # Kinetics-400 fine-tuned checkpoint transfers much better to anomaly
+  # types than the self-supervised-only weights. For more capacity use
+  # MCG-NJU/videomae-large-finetuned-kinetics (needs more VRAM).
+  pretrained: MCG-NJU/videomae-base-finetuned-kinetics
+  freeze_blocks: 6      # freeze embeddings + first N of 12 transformer blocks
+
+train:
+  epochs: 30
+  batch_size: 8         # reduce to 4 (or 2) if you run out of VRAM
+  lr: 0.0001
+  weight_decay: 0.05
+  layer_decay: 0.75     # layer-wise LR decay
+  warmup_epochs: 2
+  num_workers: 2
+  seed: 0
+  eval_every: 1
+  # Videos drawn per class per epoch by the balanced sampler.
+  # null = median class count; raise it (e.g. 100) for longer epochs.
+  samples_per_class: null
+
+loss:
+  class_balanced: true  # effective-number class weights (Cui et al. 2019)
+  cb_beta: 0.9999
+  focal_gamma: 2.0      # 0 disables focal loss -> weighted cross-entropy
+  label_smoothing: 0.1
+
+inference:
+  num_clips: 10         # clips spread uniformly over each test video
+  eval_num_clips: 5     # cheaper setting used for per-epoch eval in train.py
+  aggregation: topk_gated   # topk_gated | mean
+  topk: 3               # anomaly type decided from the k most anomalous clips
+  gate: 0.5             # below this top-k anomaly score the video is Normal
+  clip_batch_size: 4

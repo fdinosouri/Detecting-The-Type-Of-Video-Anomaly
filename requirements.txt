@@ -1,0 +1,9 @@
+torch>=2.1
+torchvision>=0.16
+transformers>=4.38
+decord>=0.6.0
+opencv-python>=4.8
+scikit-learn>=1.3
+numpy>=1.24
+pyyaml>=6.0
+tqdm>=4.66

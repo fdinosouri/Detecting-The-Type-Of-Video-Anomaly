@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+checkpoints/
+features/
+runs/
+*.npy
+*.pth
+*.pt
+.venv/
+venv/
