@@ -83,6 +83,8 @@ def parse_option():
     parser.add_argument('--resume', type=str)
     parser.add_argument('--pretrained', type=str)
     parser.add_argument('--only_test', action='store_true')
+    parser.add_argument('--reuse_scores', action='store_true',
+                        help='reuse an existing test_scores.pkl instead of recomputing it')
     parser.add_argument('--batch-size', type=int)
     parser.add_argument('--accumulation-steps', type=int)
     # model parameters
@@ -148,7 +150,10 @@ def main(config):
     if config.TEST.ONLY_TEST:
         out_path = os.path.join(config.OUTPUT, "test_scores.pkl")
 
-        if os.path.exists(out_path):
+        # A stale pkl silently mixes checkpoints/splits: one logged run matched
+        # only 10/298 videos because the file came from an older experiment.
+        if args.reuse_scores and os.path.exists(out_path):
+            logger.info(f"Reusing existing scores from {out_path}")
             scores_dict = mmcv.load(out_path)
         else:
             scores_dict = validate(val_loader, text_labels, model, config, out_path)
@@ -178,6 +183,12 @@ def main(config):
             logger.info(f'AUC: [{auc_all_p:.3f}/{auc_ano_p:.3f}]\t')
         except Exception as e:
             logger.info(f"Skipping AUC evaluation because: {e}")
+
+        try:
+            from evaluate_multiclass import evaluate_from_scores
+            evaluate_from_scores(scores_dict["prd"], config.DATA.VAL_FILE, log=logger.info)
+        except Exception as e:
+            logger.info(f"Skipping multiclass evaluation because: {e}")
 
         return
 
@@ -360,24 +371,39 @@ def train_one_epoch(epoch, model, optimizer, lr_scheduler, train_loader, text_la
             dim=-1
         )
 
-        num_clips = logits.size(1) 
+        num_clips = logits.size(1)
         topk_k = min(4, num_clips)
 
-        topk_scores, topk_indices = torch.topk(
-            scores,
+        # Rank clips by anomaly evidence (1 - P(Normal)) and use the SAME
+        # clips for every class. A per-class topk over `scores` picks the
+        # most normal-looking clips for the Normal channel of an anomaly
+        # video, so cross-entropy then punishes clips that really are
+        # normal — that label noise is what breaks the 14-class training.
+        anomaly_evidence = 1.0 - scores[:, :, 0]
+
+        _, topk_indices = torch.topk(
+            anomaly_evidence,
             k=topk_k,
             dim=1
+        )
+
+        gather_index = topk_indices.unsqueeze(-1).expand(
+            -1, -1, logits.size(-1)
         )
 
         topk_logits = torch.gather(
             logits,
             dim=1,
-            index=topk_indices
+            index=gather_index
         )
 
         logits_video = topk_logits.mean(dim=1)
 
-        selected_scores = topk_scores.mean(dim=1)
+        selected_scores = torch.gather(
+            scores,
+            dim=1,
+            index=gather_index
+        ).mean(dim=1)
 
         max_prob_video = torch.max(
             selected_scores,
