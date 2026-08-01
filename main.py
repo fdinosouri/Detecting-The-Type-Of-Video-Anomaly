@@ -814,6 +814,11 @@ if __name__ == '__main__':
 
     torch.cuda.set_device(args.local_rank)
 
+    # env:// rendezvous needs these even for a single-process run; a fresh
+    # terminal has none of them set and init_process_group crashes.
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "29500")
+
     torch.distributed.init_process_group(
         backend='gloo',
         init_method='env://',
