@@ -148,6 +148,12 @@ def main(config):
     text_labels = generate_text(train_data)
     
     if config.TEST.ONLY_TEST:
+        if not args.only_test:
+            logger.info(
+                "WARNING: TEST.ONLY_TEST is True in the config file, so NO "
+                "TRAINING will run. Set ONLY_TEST: False in the yaml to train."
+            )
+
         out_path = os.path.join(config.OUTPUT, "test_scores.pkl")
 
         # A stale pkl silently mixes checkpoints/splits: one logged run matched
