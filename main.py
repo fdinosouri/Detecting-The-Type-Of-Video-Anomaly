@@ -145,6 +145,19 @@ def main(config):
     if config.MODEL.RESUME:
         start_epoch, max_accuracy = load_checkpoint(config, model.module, optimizer, lr_scheduler, logger)
 
+        # load_checkpoint silently returns 0 when the checkpoint lacks a
+        # 'max_accuracy' key (ours store 'max_auc'), which restarts
+        # training from epoch 0 — recover the epoch directly.
+        if start_epoch == 0 and not config.TEST.ONLY_TEST:
+            ckpt = torch.load(config.MODEL.RESUME, map_location="cpu")
+            if "epoch" in ckpt:
+                start_epoch = ckpt["epoch"] + 1
+                max_auc = ckpt.get("max_auc", max_auc)
+                logger.info(
+                    f"Recovered resume epoch: starting from epoch {start_epoch}"
+                )
+            del ckpt
+
     text_labels = generate_text(train_data)
     
     if config.TEST.ONLY_TEST:
@@ -209,6 +222,7 @@ def main(config):
                 "optimizer": optimizer.state_dict(),
                 "lr_scheduler": lr_scheduler.state_dict(),
                 "max_auc": max_auc,
+                "max_accuracy": max_auc,
             }, save_path)
             logger.info(f"Saved checkpoint to {save_path}")
 
