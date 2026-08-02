@@ -240,29 +240,37 @@ def main(config):
                 is_best
             )
 
-def build_class_weights(device):
-    class_weights = torch.tensor(
-        [
-            1.00,  # Normal
-            1.20,   # Abuse
-            1.40,   # Arrest
-            1.50,   # Arson
-            1.30,   # Assault
-            1.30,   # Burglary
-            1.20,   # Explosion
-            1.60,   # Fighting
-            0.90,   # RoadAccidents
-            0.90,   # Robbery
-            2.50,   # Shooting
-            1.20,   # Shoplifting
-            1.20,   # Stealing
-            2.50,   # Vandalism
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
+def build_class_weights(config, device):
+    """Inverse-frequency class weights read from the training annotations.
 
-    return class_weights
+    Normal covers about half of the training videos while the rarest
+    anomaly types cover ~3% each, so an unweighted cross-entropy is
+    minimised by never predicting the rare classes at all.
+    """
+    num_classes = config.DATA.NUM_CLASSES
+    counts = torch.zeros(num_classes, dtype=torch.float32)
+
+    with open(config.DATA.TRAIN_FILE, "r", encoding="utf-8") as fin:
+        for line in fin:
+            parts = line.strip().split()
+
+            if len(parts) < 2:
+                continue
+
+            label = int(parts[-1])
+
+            if 0 <= label < num_classes:
+                counts[label] += 1
+
+    if (counts == 0).any():
+        missing = (counts == 0).nonzero().flatten().tolist()
+        raise ValueError(f"Classes without training samples: {missing}")
+
+    weights = counts.sum() / (num_classes * counts)
+    weights = weights / weights.mean()
+    weights = torch.clamp(weights, min=0.25, max=4.0)
+
+    return counts, weights.to(device)
 class FocalLoss(torch.nn.Module):
     def __init__(
         self,
@@ -300,13 +308,15 @@ def train_one_epoch(epoch, model, optimizer, lr_scheduler, train_loader, text_la
     model.train()
     device = torch.device("cuda", torch.cuda.current_device())
 
-    class_weights = torch.ones(
-        config.DATA.NUM_CLASSES,
-        device=device,
-    )
+    class_counts, class_weights = build_class_weights(config, device)
 
-    class_weights[10] = 2.0  # Shooting
-    class_weights[13] = 2.0  # Vandalism
+    if epoch == 0:
+        logger.info("Class counts / loss weights from " + config.DATA.TRAIN_FILE)
+        for c in range(config.DATA.NUM_CLASSES):
+            logger.info(
+                f"  class {c:2d}: count={int(class_counts[c]):4d} "
+                f"weight={class_weights[c]:.3f}"
+            )
 
     criterion_multiclass = torch.nn.CrossEntropyLoss(
         weight=class_weights,

@@ -56,6 +56,58 @@ normal — systematic label noise that corrupts the 14-class training.
 generalization of the original UMIL max-clip selection). For normal videos this
 picks the hardest negatives, exactly like the original binary code.
 
+## Round 2 — why macro avg stays low after retraining
+
+Retraining with the fixed loss moved overall accuracy 61.8% → 63.9% and
+Normal recall 0.87 → 0.91, but Anomaly-Type Accuracy stayed at ~37%.
+Counting how often each class is *predicted* over the 296 test videos
+explains where the remaining error lives:
+
+| class | true videos | times predicted | ratio |
+|---|---|---|---|
+| Fighting | 8 | **2** | 0.25 |
+| Vandalism | 8 | 5 | 0.62 |
+| Assault | 8 | 3 | 0.38 |
+| RoadAccidents | 23 | **39** | 1.70 |
+| Stealing | 15 | 20 | 1.33 |
+
+Fighting is emitted twice in the whole test set. The model has not
+"failed" on Fighting — it has learned never to say Fighting, and the
+probability mass moved to the frequent neighbours. Three causes:
+
+**1. Class imbalance was never actually corrected.** Training used
+`UCF_full_train_split.txt`, where Normal is ~50% of videos and the rare
+types ~3% each, while the loss weights were 1.0 everywhere except a
+hand-picked 2.0 for Shooting and Vandalism. Normal therefore carried
+~19x more gradient mass than Fighting. `build_class_weights` (a table of
+hand-tuned constants) existed but was never called. It is now replaced by
+inverse-frequency weights computed from the actual training file, which
+brings that ratio down to ~3.6x, and the counts and weights are logged at
+epoch 0 so the balance is visible.
+
+**2. The class prototypes are CLIP text embeddings of bare class names.**
+`generate_text` uses the template `"{}"`, so the classifier weight vector
+for each class is the CLIP embedding of a single word, and
+`MODEL.FIX_TEXT: True` freezes them. "Stealing", "Robbery", "Shoplifting"
+and "Burglary" are near-synonyms in language space, so their prototypes
+are nearly collinear and cannot separate. The confusion matrix shows
+exactly this shape: of the 61 theft-cluster videos, 66% stay inside the
+cluster but only 27 land on the right member. `labels/ucf_14_labels_descriptive.csv`
+replaces the bare words with discriminative sentences (burglary =
+breaking into a building, shoplifting = hiding goods from a shelf, etc.).
+
+**3. Eight test videos per class.** Nine of the fourteen classes have
+support 8, so one video is 12.5% recall and a 0.0000 score is one unlucky
+draw away from 0.125. macro avg weights those nine classes the same as
+the 148-video Normal class, which is why it sits near 0.33 while weighted
+avg is 0.63. Report both, and treat per-class numbers on support-8
+classes as indicative only.
+
+For context, on the anomaly videos the model gets the type right 37% of
+the time against 15.5% for always predicting the most common anomaly type
+and 7.7% for uniform random — the 14-class conversion is learning real
+signal, it is the rare-class tail that collapses.
+
 ## Recommendations (not changed in code)
 
 - **Don't double-correct class imbalance.** The balanced train file already
