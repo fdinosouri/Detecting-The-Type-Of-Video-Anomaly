@@ -92,9 +92,22 @@ for each class is the CLIP embedding of a single word, and
 and "Burglary" are near-synonyms in language space, so their prototypes
 are nearly collinear and cannot separate. The confusion matrix shows
 exactly this shape: of the 61 theft-cluster videos, 66% stay inside the
-cluster but only 27 land on the right member. `labels/ucf_14_labels_descriptive.csv`
-replaces the bare words with discriminative sentences (burglary =
-breaking into a building, shoplifting = hiding goods from a shelf, etc.).
+cluster but only 27 land on the right member.
+
+Measured on the real CLIP ViT-B/32 text encoder, the bare-name
+prototypes have a mean pairwise cosine of 0.83 (Abuse/Stealing 0.91,
+Assault/Arrest 0.91, Fighting/Shooting 0.90). Feeding a *perfect* video
+feature — one exactly equal to its own class prototype — through
+`softmax(logit_scale * cos)` then yields only P(true class) = 0.44 on
+average and 0.32 for the worst class. That is a ceiling imposed by the
+text geometry alone, before the visual encoder makes a single mistake.
+
+`labels/ucf_14_labels_descriptive.csv` replaces the bare words with
+concrete visual scene descriptions ("a burglar climbing through a broken
+window of an empty dark house" rather than "Burglary"). The same
+measurement on those prompts gives a mean ceiling of 0.86 and a worst
+class of 0.67. Abstract legal terms cluster in CLIP's language space;
+descriptions of what the camera actually sees do not.
 
 **3. Eight test videos per class.** Nine of the fourteen classes have
 support 8, so one video is 12.5% recall and a 0.0000 score is one unlucky
