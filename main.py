@@ -1,5 +1,6 @@
 import os
 import torch
+import torch.utils.data
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
@@ -85,6 +86,9 @@ def parse_option():
     parser.add_argument('--only_test', action='store_true')
     parser.add_argument('--reuse_scores', action='store_true',
                         help='reuse an existing test_scores.pkl instead of recomputing it')
+    parser.add_argument('--num-workers', type=int, default=None,
+                        help='override DataLoader workers; use 0-2 if a worker '
+                             'dies with an FFmpeg/OpenCV assertion')
     parser.add_argument('--batch-size', type=int)
     parser.add_argument('--accumulation-steps', type=int)
     # model parameters
@@ -99,8 +103,47 @@ def parse_option():
     return args, config
 
 
+def _worker_init(worker_id):
+    """Keep OpenCV/FFmpeg single-threaded inside DataLoader workers.
+
+    Decoding frames with OpenCV's own thread pool inside forked/spawned
+    workers trips an FFmpeg assertion
+    ("fctx->async_lock failed at libavcodec/pthread_frame.c"), which kills
+    the worker process and surfaces as "DataLoader worker exited
+    unexpectedly".
+    """
+    try:
+        import cv2
+        cv2.setNumThreads(0)
+    except Exception:
+        pass
+
+
+def _rebuild_loader(loader, num_workers):
+    """Same dataset/sampler/collate, but safer worker settings."""
+    return torch.utils.data.DataLoader(
+        loader.dataset,
+        sampler=loader.sampler,
+        batch_size=loader.batch_size,
+        num_workers=num_workers,
+        pin_memory=loader.pin_memory,
+        drop_last=loader.drop_last,
+        collate_fn=loader.collate_fn,
+        worker_init_fn=_worker_init,
+    )
+
+
 def main(config):
     train_data, val_data, test_data, train_loader, val_loader, test_loader, val_loader_train,_ = build_dataloader(logger, config)
+
+    # Always re-attach the worker init hook; only change the worker count
+    # when the user explicitly asks for it.
+    n_train = args.num_workers if args.num_workers is not None else train_loader.num_workers
+    n_val = args.num_workers if args.num_workers is not None else val_loader.num_workers
+    logger.info(f"DataLoader workers: train={n_train} val={n_val} (OpenCV single-threaded)")
+    train_loader = _rebuild_loader(train_loader, n_train)
+    val_loader = _rebuild_loader(val_loader, n_val)
+
     print("DEBUG len(train_data):", len(train_data))
     print("DEBUG len(val_data):", len(val_data))
     print("DEBUG len(test_data):", len(test_data))
