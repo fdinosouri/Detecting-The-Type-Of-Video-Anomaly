@@ -186,6 +186,43 @@ Binary AUC is flat (0.9637 → 0.9629), so this buys type discrimination
 without costing anomaly detection. Cost: validation goes from ~3.5 to
 ~13.5 minutes.
 
+## How much of these numbers is noise?
+
+The test split has 296 videos, and nine of the fourteen classes carry
+only 8 of them. One video changing class is 12.5% of that class's
+recall, so macro F1 moves on sampling luck alone. `bootstrap_ci.py`
+quantifies this: it resamples the matched test videos with replacement
+4000 times and recomputes every metric on each resample, which
+approximates the spread that would be seen across alternative test sets
+of the same size.
+
+On the best configuration (`exp_v3`, `TEST.NUM_CLIP: 4`):
+
+| metric | point | std | 95% CI |
+|---|---|---|---|
+| macro F1 | 0.3881 | 0.037 | [0.307, 0.454] |
+| multiclass accuracy | 0.6419 | 0.027 | [0.588, 0.693] |
+| anomaly-type accuracy | 0.4257 | 0.041 | [0.331, 0.494] |
+
+**A macro-F1 difference below roughly 0.075 is not distinguishable from
+noise on this split.** That reframes the whole experiment log: the
+single-view → four-view gain (+0.017) is 0.44 standard deviations, which
+on its own is weak evidence. It is believable here only because the
+mechanism was checked independently — the gain landed entirely in the
+violence cluster and left the theft cluster untouched, exactly as the
+temporal-vs-spatial split predicts.
+
+It also sets the bar for future work: an experiment costing a full
+retrain should be expected to move macro F1 by more than ~0.075, or it
+cannot be claimed as an improvement. This is why `NUM_FRAMES: 8` was not
+pursued — it spends ~26 hours on the temporal axis, which the four-view
+result shows is close to saturated, while 43% of the remaining anomaly
+errors sit in the theft cluster and are spatial. `ViT-B/16` (4x finer
+patches) targets that error mass instead.
+
+The width of these intervals is a property of the 70/15/15 split, not of
+the model. A 60/20/20 split would narrow them.
+
 ## Warning: `TEST.NUM_CROP: 3` is broken upstream
 
 `datasets/build.py` builds the validation pipeline as
