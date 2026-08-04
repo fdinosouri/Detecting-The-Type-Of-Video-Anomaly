@@ -157,6 +157,35 @@ visual problem: 5 frames at 224px through ViT-B/32 do not carry enough
 evidence to tell a shoplifter from an armed robber in the same shop, or
 a one-sided assault from a group brawl.
 
+## Round 4 — temporal multi-view at test time (best result)
+
+`TEST.NUM_CLIP: 4` samples four independent temporal views per clip
+(64 views per video instead of 16) and needs no retraining — it is a
+pure test-time change on the `exp_v3` checkpoint, run with
+`--opts TEST.NUM_CLIP 4`.
+
+| metric | 1 view | **4 views** |
+|---|---|---|
+| Binary video-level AUC | 0.9637 | 0.9629 |
+| Anomaly-Type Accuracy | 0.4054 | **0.4257** |
+| macro F1 | 0.3713 | **0.3881** |
+| macro recall | 0.3742 | **0.4047** |
+| multiclass accuracy | 0.6351 | **0.6419** |
+| classes with zero F1 | Fighting | **none** |
+
+Fighting finally scores (F1 0.235, 2/8 correct), so every one of the 14
+classes is now predicted and hit at least once. The gain is concentrated
+where it was predicted to be: the violence cluster
+(Abuse/Assault/Fighting) goes from 46% to 54% of its videos staying
+inside the cluster and 6 → 8 exactly right, because more temporal
+samples make a brief scuffle likelier to be captured. The theft cluster
+is unchanged (24 exact both ways) — consistent with it being a
+spatial-detail problem that more temporal views cannot fix.
+
+Binary AUC is flat (0.9637 → 0.9629), so this buys type discrimination
+without costing anomaly detection. Cost: validation goes from ~3.5 to
+~13.5 minutes.
+
 ## Warning: `TEST.NUM_CROP: 3` is broken upstream
 
 `datasets/build.py` builds the validation pipeline as
