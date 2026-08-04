@@ -7,6 +7,7 @@ from sklearn.metrics import (
     accuracy_score,
     classification_report,
     confusion_matrix,
+    f1_score,
     roc_auc_score,
 )
 
@@ -268,6 +269,12 @@ def main():
     parser.add_argument("--annotations", type=Path, default=ANNOTATION_FILE)
     parser.add_argument("--threshold", type=float, default=ANOMALY_THRESHOLD)
     parser.add_argument("--topk", type=int, default=TOP_K)
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help="try a range of thresholds and top-k values on the saved scores "
+             "instead of printing one full report",
+    )
     args = parser.parse_args()
 
     if not args.scores.exists():
@@ -290,6 +297,51 @@ def main():
     print("Result type:", type(result))
     print("Result keys:", list(result.keys()))
     print("Prediction count:", len(result["prd"]))
+
+    if args.sweep:
+        quiet = lambda *a, **k: None
+        print()
+        print(f"{'top-k':>6s} {'thresh':>7s} {'accuracy':>9s} {'macro F1':>9s} "
+              f"{'type acc':>9s}")
+
+        best = None
+
+        for top_k in (1, 2, 4, 8):
+            for threshold in (0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9):
+                res = evaluate_from_scores(
+                    result["prd"],
+                    args.annotations,
+                    anomaly_threshold=threshold,
+                    top_k=top_k,
+                    log=quiet,
+                )
+
+                macro_f1 = f1_score(
+                    res["y_true"],
+                    res["y_pred"],
+                    average="macro",
+                    labels=list(range(len(CLASS_NAMES))),
+                    zero_division=0,
+                )
+
+                is_anomaly = res["y_true"] > 0
+                type_acc = float(
+                    (res["y_anomaly_class"][is_anomaly]
+                     == res["y_true"][is_anomaly]).mean()
+                )
+
+                print(f"{top_k:6d} {threshold:7.2f} {res['accuracy']:9.4f} "
+                      f"{macro_f1:9.4f} {type_acc:9.4f}")
+
+                if best is None or macro_f1 > best[0]:
+                    best = (macro_f1, top_k, threshold)
+
+        print()
+        print(f"best macro F1 = {best[0]:.4f} at top-k={best[1]} "
+              f"threshold={best[2]}")
+        print("Note: this picks hyper-parameters on the test split, so treat "
+              "the swept numbers as an upper bound, not a clean test score.")
+        return
 
     evaluate_from_scores(
         result["prd"],
