@@ -157,6 +157,37 @@ visual problem: 5 frames at 224px through ViT-B/32 do not carry enough
 evidence to tell a shoplifter from an armed robber in the same shop, or
 a one-sided assault from a group brawl.
 
+## Warning: `TEST.NUM_CROP: 3` is broken upstream
+
+`datasets/build.py` builds the validation pipeline as
+
+```
+[0] SampleFrames  [1] RawFrameDecode  [2] Resize  [3] CenterCrop
+[4] Normalize     [5] FormatShape     [6] Collect [7] ToTensor
+```
+
+and then, for three-crop testing, does
+
+```python
+val_pipeline[3] = dict(type='Resize', ...)
+val_pipeline[4] = dict(type='ThreeCrop', ...)
+```
+
+Index 4 is `Normalize`, so enabling `NUM_CROP: 3` silently **deletes
+normalisation** and feeds raw 0-255 pixels to a CLIP backbone that
+expects mean/std-normalised input. Results under that setting are
+meaningless. Insert instead of overwrite if three-crop testing is wanted:
+
+```python
+if config.TEST.NUM_CROP == 3:
+    val_pipeline[3] = dict(type='Resize', scale=(-1, config.DATA.INPUT_SIZE))
+    val_pipeline.insert(4, dict(type='ThreeCrop', crop_size=config.DATA.INPUT_SIZE))
+```
+
+`TEST.NUM_CLIP > 1` (temporal multi-view) has no such problem — it only
+replaces index 0 with a `multiview` `SampleFrames`, which the pipeline
+supports.
+
 ## Recommendations (not changed in code)
 
 - **Don't double-correct class imbalance.** The balanced train file already
