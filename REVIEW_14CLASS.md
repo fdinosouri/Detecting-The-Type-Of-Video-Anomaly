@@ -121,6 +121,42 @@ the time against 15.5% for always predicting the most common anomaly type
 and 7.7% for uniform random — the 14-class conversion is learning real
 signal, it is the rare-class tail that collapses.
 
+## Round 3 — results after the fixes, and where the bottleneck moved
+
+`exp_v3` = descriptive prompts + inverse-frequency weights + balanced
+train file, 15 epochs. Compared with `exp_v2` (bare prompts, ad-hoc
+weights, unbalanced split):
+
+| metric | exp_v2 | exp_v3 |
+|---|---|---|
+| Binary video-level AUC | 0.9473 | **0.9637** |
+| Anomaly-Type Accuracy | 0.3716 | **0.4054** |
+| macro F1 | 0.3327 | **0.3713** |
+| macro precision | 0.3745 | **0.4093** |
+| multiclass accuracy | 0.6385 | 0.6351 |
+
+Per-class F1 for the classes that were dead: Arrest 0.000 → 0.556,
+Vandalism 0.000 → 0.167, Abuse 0.462 → 0.714, Stealing 0.200 → 0.350.
+Fighting is now *predicted* 9 times instead of 2, so the collapse is
+fixed, but it is still 0/8 correct — three of those nine predictions are
+Assault videos.
+
+Overall accuracy is flat because the gains on rare classes are paid for
+by Normal (13 → 18 normal videos called anomalous). That is the expected
+trade when the loss stops being dominated by the majority class, and it
+is the right trade for a 14-class task: macro F1 and type accuracy both
+went up.
+
+**The bottleneck is no longer the prompts.** The two worst remaining
+confusions are Shoplifting → Robbery (6 of 8) and Burglary → Robbery
+(5 of 15), yet those prompt pairs have cosine 0.71 and 0.67 — well
+separated in text space. A rewrite aimed at pushing them further apart
+was measured and made things *worse* (mean ceiling 0.86 → 0.74), so the
+prompts in `ucf_14_labels_descriptive.csv` are kept. What remains is a
+visual problem: 5 frames at 224px through ViT-B/32 do not carry enough
+evidence to tell a shoplifter from an armed robber in the same shop, or
+a one-sided assault from a group brawl.
+
 ## Recommendations (not changed in code)
 
 - **Don't double-correct class imbalance.** The balanced train file already
