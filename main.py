@@ -29,6 +29,8 @@ def evaluate_video_level_auc(vid2abnormality, anno_file):
 
         pred_map[base] = float(np.max(arr))
 
+    from evaluate_multiclass import parse_annotation_label
+
     for line in open(anno_file, 'r', encoding='utf-8'):
         parts = line.strip().split()
 
@@ -38,7 +40,7 @@ def evaluate_video_level_auc(vid2abnormality, anno_file):
         video_name = os.path.basename(parts[0])
 
         try:
-            label = int(parts[-1])
+            label = parse_annotation_label(parts)
         except:
             continue
 

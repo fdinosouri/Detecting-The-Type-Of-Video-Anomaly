@@ -45,6 +45,24 @@ def normalize_video_name(value):
     return Path(filename).stem.lower()
 
 
+def parse_annotation_label(parts):
+    """Read the class label exactly as datasets/build.py FrameDataset does.
+
+        4 fields  -> path start end label   (label at index 3)
+        otherwise -> path end label ...     (label at index 2)
+
+    The custom `UCF_full_*` splits have 4 fields, but the standard
+    `UCF_test.txt` has 7 (`path frames class start end start2 end2`).
+    Reading `parts[-1]` therefore picks the trailing temporal marker
+    `-1` on the standard split, which silently labels every video as an
+    anomaly. Evaluation must read the same column the dataset reads.
+    """
+    if len(parts) == 4:
+        return int(parts[3])
+
+    return int(parts[2])
+
+
 def read_ground_truth(annotation_file):
     ground_truth = {}
     original_paths = {}
@@ -58,11 +76,11 @@ def read_ground_truth(annotation_file):
 
             parts = line.split()
 
-            if len(parts) < 2:
+            if len(parts) < 3:
                 continue
 
             video_path = parts[0]
-            label = int(parts[-1])
+            label = parse_annotation_label(parts)
             video_name = normalize_video_name(video_path)
 
             ground_truth[video_name] = label
