@@ -31,11 +31,44 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from sklearn.metrics import f1_score
+
 from evaluate_multiclass import (
+    ANOMALY_THRESHOLD,
     CLASS_NAMES,
     evaluate_from_scores,
     parse_annotation_label,
+    scores_to_prediction,
 )
+
+LABELS = list(range(len(CLASS_NAMES)))
+
+
+def predict_labels(probs, threshold, top_k):
+    """Two-stage video decision for a batch of clip-probability arrays."""
+    preds = [
+        scores_to_prediction(p, anomaly_threshold=threshold, top_k=top_k)[0]
+        for p in probs
+    ]
+
+    return np.asarray(preds, dtype=np.int64)
+
+
+def stratified_split(labels, val_frac, seed):
+    """Hold out val_frac of each class, so rare classes appear in both."""
+    rng = np.random.default_rng(seed)
+    train_idx, val_idx = [], []
+
+    for c in np.unique(labels):
+        idx = np.flatnonzero(labels == c)
+        rng.shuffle(idx)
+
+        # Never take the last example of a class away from training.
+        n_val = min(int(round(len(idx) * val_frac)), len(idx) - 1)
+        val_idx.extend(idx[:n_val])
+        train_idx.extend(idx[n_val:])
+
+    return np.array(sorted(train_idx)), np.array(sorted(val_idx))
 
 
 def load_split(annotation_file, feature_dir):
@@ -161,6 +194,10 @@ def main():
                         help="0 = linear head, otherwise MLP width")
     parser.add_argument("--dropout", type=float, default=0.3)
     parser.add_argument("--topk", type=int, default=4)
+    parser.add_argument("--val-frac", type=float, default=0.15,
+                        help="fraction of the training split held out to pick "
+                             "the epoch; 0 disables and selects on test, "
+                             "which inflates the reported number")
     parser.add_argument("--w-smooth", type=float, default=0.01)
     parser.add_argument("--w-sparse", type=float, default=0.001)
     parser.add_argument("--seed", type=int, default=1024)
@@ -177,6 +214,19 @@ def main():
     print(f"train {len(tr_names)} videos (missing features: {tr_missing})")
     print(f"test  {len(te_names)} videos (missing features: {te_missing})")
     print(f"features: {tuple(tr_x.shape[1:])} per video   device: {device}")
+
+    if args.val_frac > 0:
+        fit_idx, val_idx = stratified_split(
+            tr_y.numpy(), args.val_frac, args.seed
+        )
+        va_x, va_y = tr_x[val_idx], tr_y[val_idx]
+        tr_x, tr_y = tr_x[fit_idx], tr_y[fit_idx]
+        print(f"held out {len(val_idx)} videos for epoch selection, "
+              f"fitting on {len(fit_idx)}")
+    else:
+        va_x = va_y = None
+        print("no validation split: the epoch is picked on the test set, "
+              "which makes the reported number optimistic")
 
     counts, class_weights = build_class_weights(
         tr_y, len(CLASS_NAMES), device
@@ -200,7 +250,7 @@ def main():
     )
 
     args.out.mkdir(parents=True, exist_ok=True)
-    order = np.arange(len(tr_names))
+    order = np.arange(len(tr_y))
     best = {"macro_f1": -1.0}
     start = time.time()
 
@@ -238,40 +288,62 @@ def main():
             scores, args.test, top_k=args.topk, log=lambda *a, **k: None
         )
 
-        from sklearn.metrics import f1_score
-        macro = f1_score(
-            res["y_true"], res["y_pred"], average="macro",
-            labels=list(range(len(CLASS_NAMES))), zero_division=0,
-        )
+        is_ano = res["y_true"] > 0
+        test_metrics = {
+            "macro_f1": f1_score(
+                res["y_true"], res["y_pred"], average="macro",
+                labels=LABELS, zero_division=0,
+            ),
+            "accuracy": res["accuracy"],
+            "type_accuracy": float(
+                (res["y_anomaly_class"][is_ano]
+                 == res["y_true"][is_ano]).mean()
+            ),
+        }
 
-        if macro > best["macro_f1"]:
-            is_ano = res["y_true"] > 0
-            best = {
-                "macro_f1": macro,
-                "epoch": epoch,
-                "accuracy": res["accuracy"],
-                "type_accuracy": float(
-                    (res["y_anomaly_class"][is_ano]
-                     == res["y_true"][is_ano]).mean()
-                ),
-            }
+        if va_x is not None:
+            va_probs = predict(model, va_x, args.batch_size, device)
+            va_pred = predict_labels(
+                va_probs, ANOMALY_THRESHOLD, args.topk
+            )
+            selector = f1_score(
+                va_y.numpy(), va_pred, average="macro",
+                labels=LABELS, zero_division=0,
+            )
+        else:
+            selector = test_metrics["macro_f1"]
+
+        if selector > best.get("selector", -1.0):
+            best = {"selector": selector, "epoch": epoch, **test_metrics}
             torch.save(model.state_dict(), args.out / "best_head.pth")
 
             with (args.out / "test_scores.pkl").open("wb") as fh:
                 pickle.dump({"prd": scores}, fh)
 
         if epoch % 5 == 0 or epoch == args.epochs - 1:
+            extra = f"  val macro F1 {selector:.4f}" if va_x is not None else ""
             print(f"epoch {epoch:3d}  loss {total / seen:.4f} "
                   f"(mil {mil_only / seen:.4f})  "
-                  f"test macro F1 {macro:.4f}  acc {res['accuracy']:.4f}")
+                  f"test macro F1 {test_metrics['macro_f1']:.4f}  "
+                  f"acc {test_metrics['accuracy']:.4f}{extra}")
+
+        final = test_metrics
 
     print(f"\ntrained in {time.time() - start:.0f}s")
-    print(f"best macro F1 {best['macro_f1']:.4f} at epoch {best['epoch']}  "
-          f"accuracy {best['accuracy']:.4f}  "
-          f"anomaly-type accuracy {best['type_accuracy']:.4f}")
-    print(f"scores written to {args.out / 'test_scores.pkl'}")
-    print(f"\nSelecting the best epoch on the test split makes this an "
-          f"optimistic estimate -- report it as such.")
+    print(f"\nepoch {best['epoch']} selected on "
+          f"{'validation' if va_x is not None else 'TEST (optimistic)'}:")
+    print(f"  test macro F1              {best['macro_f1']:.4f}")
+    print(f"  test accuracy              {best['accuracy']:.4f}")
+    print(f"  test anomaly-type accuracy {best['type_accuracy']:.4f}")
+    print(f"\nlast epoch, for reference:")
+    print(f"  test macro F1              {final['macro_f1']:.4f}")
+    print(f"  test accuracy              {final['accuracy']:.4f}")
+    print(f"  test anomaly-type accuracy {final['type_accuracy']:.4f}")
+    print(f"\nscores written to {args.out / 'test_scores.pkl'}")
+
+    if va_x is None:
+        print("\nThe epoch was picked on the test split, so treat these as "
+              "an upper bound rather than a clean test score.")
 
 
 if __name__ == "__main__":
