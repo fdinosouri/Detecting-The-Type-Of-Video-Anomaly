@@ -225,6 +225,38 @@ surveillance footage, so this measures how far frozen Kinetics-pretrained
 VideoMAE features carry the task, not what end-to-end fine-tuning would
 reach.
 
+### Result
+
+Extraction took 67 minutes for all 1895 videos; each head then trains in
+about 7 seconds, which is what made a hyper-parameter comparison
+possible at all. Best configuration was an MLP head (512 hidden,
+dropout 0.3, 25 epochs).
+
+| | X-CLIP fine-tuned | VideoMAE frozen |
+|---|---|---|
+| split | custom 70/15/15 | official UCF-Crime |
+| training | ~16 h end-to-end | 67 min extract + 7 s head |
+| binary video-level AUC | 0.9629 | 0.9504 [0.925, 0.972] |
+| anomaly-type accuracy | 0.4257 | 0.4286 [0.348, 0.512] |
+| macro F1 | 0.3881 [0.307, 0.454] | 0.3360 [0.263, 0.397] |
+
+The confidence intervals overlap on every metric, and anomaly-type
+accuracy is the same to within 0.003 — so on this data the two backbones
+are not distinguishable, with VideoMAE reaching that from frozen
+features at a fraction of the training cost. The macro-F1 gap is partly
+the split: the simulation above puts the official split's test
+distribution alone at about -0.038.
+
+### Validation-based epoch selection is also noisy here
+
+Holding out 15% of training gives only 4 validation videos each for
+Explosion, Shooting and Shoplifting, and validation macro F1 duly jumps
+around (0.299, 0.333, 0.391, 0.357, 0.401 across epochs). In one run the
+epoch it selected scored *worse* on test than simply taking the last
+epoch (0.3113 vs 0.3260). With a test set this small, the defensible
+protocol is to fix the epoch budget in advance and report the final
+epoch, so no split is used for selection at all.
+
 ## How much of these numbers is noise?
 
 The test split has 296 videos, and nine of the fourteen classes carry
