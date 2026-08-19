@@ -186,6 +186,45 @@ Binary AUC is flat (0.9637 → 0.9629), so this buys type discrimination
 without costing anomaly detection. Cost: validation goes from ~3.5 to
 ~13.5 minutes.
 
+## Swapping the backbone to VideoMAE
+
+VideoMAE is not a drop-in replacement for the CLIP backbone. UMIL has no
+classifier layer at all — `logits = einsum(v_features, logit_scale *
+t_features)` scores a video by its cosine similarity to CLIP *text*
+embeddings. VideoMAE is vision-only, so the text head has to be replaced
+by a learnable linear classifier. That is not purely a loss: the measured
+text-prototype ceiling (0.44 with bare names, 0.86 with descriptions)
+disappears entirely when the class vectors are free parameters.
+
+Direction-wise it targets the right thing. VideoMAE ViT-B uses 16x16
+patches against CLIP ViT-B/32's 32x32 — four times the spatial detail,
+which is where 43% of the remaining anomaly errors sit — and it is
+pretrained on video rather than images, which is where the other 18%
+sit.
+
+The obstacle is cost. Per clip, CLIP ViT-B/32 at 5 frames is 245 tokens;
+VideoMAE ViT-B at 16 frames with tubelet 2 is 1568. Roughly eight times
+the compute turns a 16-hour run into several days, and at batch size 2
+the current setup already peaks near 9.4 GB.
+
+So the encoder is frozen and its output cached instead:
+
+- `extract_videomae_features.py` samples `--num-clips` clips per video,
+  runs the encoder once, mean-pools each clip's tokens and writes one
+  `[num_clips, 768]` array per video. The whole dataset is ~93 MB, and
+  the job resumes if interrupted.
+- `train_mil_head.py` trains a small head on those cached features with
+  the corrected top-k MIL loss and inverse-frequency class weights. An
+  epoch is seconds rather than an hour, so hyper-parameters can actually
+  be swept. It writes `test_scores.pkl` in main.py's layout, so
+  `evaluate_multiclass.py --sweep` and `bootstrap_ci.py` work on it
+  unchanged.
+
+The trade-off to state in any write-up: the backbone never adapts to
+surveillance footage, so this measures how far frozen Kinetics-pretrained
+VideoMAE features carry the task, not what end-to-end fine-tuning would
+reach.
+
 ## How much of these numbers is noise?
 
 The test split has 296 videos, and nine of the fourteen classes carry
