@@ -5,3 +5,6 @@ einops
 termcolor
 timm
 regex
+# VideoMAE feature extraction (extract_videomae_features.py)
+transformers
+opencv-python

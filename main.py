@@ -1,5 +1,6 @@
 import os
 import torch
+import torch.utils.data
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import torch.distributed as dist
@@ -28,6 +29,8 @@ def evaluate_video_level_auc(vid2abnormality, anno_file):
 
         pred_map[base] = float(np.max(arr))
 
+    from evaluate_multiclass import parse_annotation_label
+
     for line in open(anno_file, 'r', encoding='utf-8'):
         parts = line.strip().split()
 
@@ -37,7 +40,7 @@ def evaluate_video_level_auc(vid2abnormality, anno_file):
         video_name = os.path.basename(parts[0])
 
         try:
-            label = int(parts[-1])
+            label = parse_annotation_label(parts)
         except:
             continue
 
@@ -83,6 +86,11 @@ def parse_option():
     parser.add_argument('--resume', type=str)
     parser.add_argument('--pretrained', type=str)
     parser.add_argument('--only_test', action='store_true')
+    parser.add_argument('--reuse_scores', action='store_true',
+                        help='reuse an existing test_scores.pkl instead of recomputing it')
+    parser.add_argument('--num-workers', type=int, default=None,
+                        help='override DataLoader workers; use 0-2 if a worker '
+                             'dies with an FFmpeg/OpenCV assertion')
     parser.add_argument('--batch-size', type=int)
     parser.add_argument('--accumulation-steps', type=int)
     # model parameters
@@ -97,8 +105,47 @@ def parse_option():
     return args, config
 
 
+def _worker_init(worker_id):
+    """Keep OpenCV/FFmpeg single-threaded inside DataLoader workers.
+
+    Decoding frames with OpenCV's own thread pool inside forked/spawned
+    workers trips an FFmpeg assertion
+    ("fctx->async_lock failed at libavcodec/pthread_frame.c"), which kills
+    the worker process and surfaces as "DataLoader worker exited
+    unexpectedly".
+    """
+    try:
+        import cv2
+        cv2.setNumThreads(0)
+    except Exception:
+        pass
+
+
+def _rebuild_loader(loader, num_workers):
+    """Same dataset/sampler/collate, but safer worker settings."""
+    return torch.utils.data.DataLoader(
+        loader.dataset,
+        sampler=loader.sampler,
+        batch_size=loader.batch_size,
+        num_workers=num_workers,
+        pin_memory=loader.pin_memory,
+        drop_last=loader.drop_last,
+        collate_fn=loader.collate_fn,
+        worker_init_fn=_worker_init,
+    )
+
+
 def main(config):
     train_data, val_data, test_data, train_loader, val_loader, test_loader, val_loader_train,_ = build_dataloader(logger, config)
+
+    # Always re-attach the worker init hook; only change the worker count
+    # when the user explicitly asks for it.
+    n_train = args.num_workers if args.num_workers is not None else train_loader.num_workers
+    n_val = args.num_workers if args.num_workers is not None else val_loader.num_workers
+    logger.info(f"DataLoader workers: train={n_train} val={n_val} (OpenCV single-threaded)")
+    train_loader = _rebuild_loader(train_loader, n_train)
+    val_loader = _rebuild_loader(val_loader, n_val)
+
     print("DEBUG len(train_data):", len(train_data))
     print("DEBUG len(val_data):", len(val_data))
     print("DEBUG len(test_data):", len(test_data))
@@ -143,12 +190,34 @@ def main(config):
     if config.MODEL.RESUME:
         start_epoch, max_accuracy = load_checkpoint(config, model.module, optimizer, lr_scheduler, logger)
 
+        # load_checkpoint silently returns 0 when the checkpoint lacks a
+        # 'max_accuracy' key (ours store 'max_auc'), which restarts
+        # training from epoch 0 — recover the epoch directly.
+        if start_epoch == 0 and not config.TEST.ONLY_TEST:
+            ckpt = torch.load(config.MODEL.RESUME, map_location="cpu")
+            if "epoch" in ckpt:
+                start_epoch = ckpt["epoch"] + 1
+                max_auc = ckpt.get("max_auc", max_auc)
+                logger.info(
+                    f"Recovered resume epoch: starting from epoch {start_epoch}"
+                )
+            del ckpt
+
     text_labels = generate_text(train_data)
     
     if config.TEST.ONLY_TEST:
+        if not args.only_test:
+            logger.info(
+                "WARNING: TEST.ONLY_TEST is True in the config file, so NO "
+                "TRAINING will run. Set ONLY_TEST: False in the yaml to train."
+            )
+
         out_path = os.path.join(config.OUTPUT, "test_scores.pkl")
 
-        if os.path.exists(out_path):
+        # A stale pkl silently mixes checkpoints/splits: one logged run matched
+        # only 10/298 videos because the file came from an older experiment.
+        if args.reuse_scores and os.path.exists(out_path):
+            logger.info(f"Reusing existing scores from {out_path}")
             scores_dict = mmcv.load(out_path)
         else:
             scores_dict = validate(val_loader, text_labels, model, config, out_path)
@@ -179,6 +248,12 @@ def main(config):
         except Exception as e:
             logger.info(f"Skipping AUC evaluation because: {e}")
 
+        try:
+            from evaluate_multiclass import evaluate_from_scores
+            evaluate_from_scores(scores_dict["prd"], config.DATA.VAL_FILE, log=logger.info)
+        except Exception as e:
+            logger.info(f"Skipping multiclass evaluation because: {e}")
+
         return
 
     for epoch in range(start_epoch, config.TRAIN.EPOCHS):
@@ -192,6 +267,7 @@ def main(config):
                 "optimizer": optimizer.state_dict(),
                 "lr_scheduler": lr_scheduler.state_dict(),
                 "max_auc": max_auc,
+                "max_accuracy": max_auc,
             }, save_path)
             logger.info(f"Saved checkpoint to {save_path}")
 
@@ -209,29 +285,37 @@ def main(config):
                 is_best
             )
 
-def build_class_weights(device):
-    class_weights = torch.tensor(
-        [
-            1.00,  # Normal
-            1.20,   # Abuse
-            1.40,   # Arrest
-            1.50,   # Arson
-            1.30,   # Assault
-            1.30,   # Burglary
-            1.20,   # Explosion
-            1.60,   # Fighting
-            0.90,   # RoadAccidents
-            0.90,   # Robbery
-            2.50,   # Shooting
-            1.20,   # Shoplifting
-            1.20,   # Stealing
-            2.50,   # Vandalism
-        ],
-        dtype=torch.float32,
-        device=device,
-    )
+def build_class_weights(config, device):
+    """Inverse-frequency class weights read from the training annotations.
 
-    return class_weights
+    Normal covers about half of the training videos while the rarest
+    anomaly types cover ~3% each, so an unweighted cross-entropy is
+    minimised by never predicting the rare classes at all.
+    """
+    num_classes = config.DATA.NUM_CLASSES
+    counts = torch.zeros(num_classes, dtype=torch.float32)
+
+    with open(config.DATA.TRAIN_FILE, "r", encoding="utf-8") as fin:
+        for line in fin:
+            parts = line.strip().split()
+
+            if len(parts) < 2:
+                continue
+
+            label = int(parts[-1])
+
+            if 0 <= label < num_classes:
+                counts[label] += 1
+
+    if (counts == 0).any():
+        missing = (counts == 0).nonzero().flatten().tolist()
+        raise ValueError(f"Classes without training samples: {missing}")
+
+    weights = counts.sum() / (num_classes * counts)
+    weights = weights / weights.mean()
+    weights = torch.clamp(weights, min=0.25, max=4.0)
+
+    return counts, weights.to(device)
 class FocalLoss(torch.nn.Module):
     def __init__(
         self,
@@ -269,13 +353,15 @@ def train_one_epoch(epoch, model, optimizer, lr_scheduler, train_loader, text_la
     model.train()
     device = torch.device("cuda", torch.cuda.current_device())
 
-    class_weights = torch.ones(
-        config.DATA.NUM_CLASSES,
-        device=device,
-    )
+    class_counts, class_weights = build_class_weights(config, device)
 
-    class_weights[10] = 2.0  # Shooting
-    class_weights[13] = 2.0  # Vandalism
+    if epoch == 0:
+        logger.info("Class counts / loss weights from " + config.DATA.TRAIN_FILE)
+        for c in range(config.DATA.NUM_CLASSES):
+            logger.info(
+                f"  class {c:2d}: count={int(class_counts[c]):4d} "
+                f"weight={class_weights[c]:.3f}"
+            )
 
     criterion_multiclass = torch.nn.CrossEntropyLoss(
         weight=class_weights,
@@ -360,24 +446,39 @@ def train_one_epoch(epoch, model, optimizer, lr_scheduler, train_loader, text_la
             dim=-1
         )
 
-        num_clips = logits.size(1) 
+        num_clips = logits.size(1)
         topk_k = min(4, num_clips)
 
-        topk_scores, topk_indices = torch.topk(
-            scores,
+        # Rank clips by anomaly evidence (1 - P(Normal)) and use the SAME
+        # clips for every class. A per-class topk over `scores` picks the
+        # most normal-looking clips for the Normal channel of an anomaly
+        # video, so cross-entropy then punishes clips that really are
+        # normal — that label noise is what breaks the 14-class training.
+        anomaly_evidence = 1.0 - scores[:, :, 0]
+
+        _, topk_indices = torch.topk(
+            anomaly_evidence,
             k=topk_k,
             dim=1
+        )
+
+        gather_index = topk_indices.unsqueeze(-1).expand(
+            -1, -1, logits.size(-1)
         )
 
         topk_logits = torch.gather(
             logits,
             dim=1,
-            index=topk_indices
+            index=gather_index
         )
 
         logits_video = topk_logits.mean(dim=1)
 
-        selected_scores = topk_scores.mean(dim=1)
+        selected_scores = torch.gather(
+            scores,
+            dim=1,
+            index=gather_index
+        ).mean(dim=1)
 
         max_prob_video = torch.max(
             selected_scores,
@@ -787,6 +888,11 @@ if __name__ == '__main__':
     print("DEBUG local_rank after fix:", args.local_rank)
 
     torch.cuda.set_device(args.local_rank)
+
+    # env:// rendezvous needs these even for a single-process run; a fresh
+    # terminal has none of them set and init_process_group crashes.
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    os.environ.setdefault("MASTER_PORT", "29500")
 
     torch.distributed.init_process_group(
         backend='gloo',
