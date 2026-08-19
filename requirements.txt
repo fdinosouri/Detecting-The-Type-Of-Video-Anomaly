@@ -5,6 +5,8 @@ einops
 termcolor
 timm
 regex
-# VideoMAE feature extraction (extract_videomae_features.py)
-transformers
+# VideoMAE feature extraction (extract_videomae_features.py).
+# transformers 5.x needs torch >= 2.1; this project is pinned to torch
+# 1.13 by its mmcv build, so stay on the 4.x line.
+transformers==4.35.2
 opencv-python

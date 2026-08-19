@@ -173,7 +173,22 @@ def main():
                         help="stop after N videos (smoke test)")
     args = parser.parse_args()
 
+    import transformers
     from transformers import VideoMAEModel
+
+    try:
+        # transformers loads model classes lazily, so a missing torch
+        # backend only surfaces when the class is touched.
+        VideoMAEModel.from_pretrained
+    except ImportError:
+        sys.exit(
+            f"transformers {transformers.__version__} cannot see torch "
+            f"{torch.__version__}.\n"
+            f"transformers 5.x requires torch >= 2.1, and upgrading torch "
+            f"would break the mmcv build this project depends on.\n"
+            f"Install a compatible release instead:\n"
+            f"    pip install \"transformers==4.35.2\""
+        )
 
     videos = read_annotations(args.annotations)
 
