@@ -232,13 +232,24 @@ about 7 seconds, which is what made a hyper-parameter comparison
 possible at all. Best configuration was an MLP head (512 hidden,
 dropout 0.3, 25 epochs).
 
-| | X-CLIP fine-tuned | VideoMAE frozen |
-|---|---|---|
-| split | custom 70/15/15 | official UCF-Crime |
-| training | ~16 h end-to-end | 67 min extract + 7 s head |
-| binary video-level AUC | 0.9629 | 0.9504 [0.925, 0.972] |
-| anomaly-type accuracy | 0.4257 | 0.4286 [0.348, 0.512] |
-| macro F1 | 0.3881 [0.307, 0.454] | 0.3360 [0.263, 0.397] |
+| | X-CLIP fine-tuned | VideoMAE ViT-B frozen | VideoMAE ViT-L frozen |
+|---|---|---|---|
+| split | custom 70/15/15 | official | official |
+| training | ~16 h end-to-end | 67 min + 80 s | 150 min + 80 s |
+| binary video-level AUC | 0.9629 | 0.9649 | 0.9610 [0.938, 0.981] |
+| anomaly-type accuracy | 0.4257 | 0.4214 | **0.4786** [0.397, 0.563] |
+| macro F1 | 0.3881 [0.307, 0.454] | 0.3645 | **0.4122** [0.326, 0.479] |
+| multiclass accuracy | 0.6419 | 0.6552 | **0.6897** [0.638, 0.745] |
+
+Frozen ViT-L beats the fine-tuned CLIP backbone on all three
+multiclass metrics, and does it on the harder official split.
+
+One thing the table makes plain: **binary AUC is saturated.** All three
+backbones land between 0.961 and 0.965 despite differing by 0.05 in
+anomaly-type accuracy. Deciding *whether* a surveillance video is
+anomalous is not what separates these models — deciding *which* anomaly
+is. Any future work here should be measured on the type metrics, because
+binary AUC no longer has room to move.
 
 The confidence intervals overlap on every metric, and anomaly-type
 accuracy is the same to within 0.003 — so on this data the two backbones
