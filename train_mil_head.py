@@ -71,8 +71,16 @@ def stratified_split(labels, val_frac, seed):
     return np.array(sorted(train_idx)), np.array(sorted(val_idx))
 
 
-def load_split(annotation_file, feature_dir):
-    """Return (names, features, labels), skipping videos with no cache."""
+def load_split(annotation_file, feature_dirs):
+    """Return (names, features, labels), skipping videos with no cache.
+
+    Several feature directories are concatenated along the channel axis,
+    so features from different encoders can be combined without
+    re-extracting anything.
+    """
+    if isinstance(feature_dirs, (str, Path)):
+        feature_dirs = [feature_dirs]
+
     names, feats, labels = [], [], []
     missing = 0
 
@@ -84,14 +92,16 @@ def load_split(annotation_file, feature_dir):
                 continue
 
             name = parts[0].split("/")[-1].split("\\")[-1]
-            path = Path(feature_dir) / f"{Path(name).stem}.npy"
+            paths = [
+                Path(d) / f"{Path(name).stem}.npy" for d in feature_dirs
+            ]
 
-            if not path.exists():
+            if not all(q.exists() for q in paths):
                 missing += 1
                 continue
 
             names.append(name)
-            feats.append(np.load(path))
+            feats.append(np.concatenate([np.load(q) for q in paths], axis=-1))
             labels.append(parse_annotation_label(parts))
 
     if not names:
@@ -210,13 +220,26 @@ def build_class_weights(labels, num_classes, device):
 
 
 @torch.no_grad()
-def predict(model, feats, batch_size, device):
+def predict(model, feats, batch_size, device, logit_offset=None):
+    """Clip probabilities, optionally with a long-tail logit adjustment.
+
+    Subtracting tau * log(prior) from the logits at inference is the
+    standard correction for long-tailed classification (Menon et al.,
+    2021). Normal is half the training data while Shooting is under 2%,
+    and macro F1 weights them equally, so shifting the decision boundary
+    toward the rare classes is exactly what this metric rewards.
+    """
     model.eval()
     out = []
 
     for i in range(0, len(feats), batch_size):
         chunk = feats[i:i + batch_size].to(device)
-        out.append(F.softmax(model(chunk), dim=-1).cpu().numpy())
+        logits = model(chunk)
+
+        if logit_offset is not None:
+            logits = logits - logit_offset
+
+        out.append(F.softmax(logits, dim=-1).cpu().numpy())
 
     return np.concatenate(out)
 
@@ -229,7 +252,7 @@ def build_head(arch, in_dim, num_classes, hidden, dropout):
 
 
 def train_one(args, tr_x, tr_y, class_weights, eval_sets, seed, device,
-              verbose):
+              verbose, logit_offset=None):
     """Train one head from scratch and return probabilities for eval_sets."""
     torch.manual_seed(seed)
     np.random.seed(seed)
@@ -274,7 +297,8 @@ def train_one(args, tr_x, tr_y, class_weights, eval_sets, seed, device,
 
     return (
         model,
-        [predict(model, x, args.batch_size, device) for x in eval_sets],
+        [predict(model, x, args.batch_size, device, logit_offset)
+         for x in eval_sets],
     )
 
 
@@ -287,7 +311,9 @@ def macro_f1_of(probs, labels, top_k):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--features", type=Path, required=True)
+    parser.add_argument("--features", type=Path, nargs="+", required=True,
+                        help="one or more cached-feature directories; "
+                             "several are concatenated per clip")
     parser.add_argument("--train", type=Path, required=True)
     parser.add_argument("--test", type=Path, required=True)
     parser.add_argument("--out", type=Path, default=Path("exp_mae"))
@@ -311,6 +337,10 @@ def main():
                              "anything, the epoch budget is fixed in advance")
     parser.add_argument("--w-smooth", type=float, default=0.01)
     parser.add_argument("--w-sparse", type=float, default=0.001)
+    parser.add_argument("--logit-adjust", type=float, default=0.0,
+                        help="tau for the long-tail logit adjustment at "
+                             "inference; 1.0 is the standard setting, "
+                             "0 disables it")
     parser.add_argument("--seed", type=int, default=1024)
     args = parser.parse_args()
 
@@ -342,6 +372,14 @@ def main():
         print(f"  {c:2d} {CLASS_NAMES[c]:15s} count={int(counts[c]):4d} "
               f"weight={class_weights[c]:.3f}")
 
+    logit_offset = None
+
+    if args.logit_adjust:
+        prior = (counts / counts.sum()).to(device)
+        logit_offset = args.logit_adjust * torch.log(prior)
+        print(f"\nlogit adjustment tau={args.logit_adjust} "
+              f"(Normal {prior[0]:.3f} vs Shooting {prior[10]:.3f})")
+
     eval_sets = [te_x] + ([va_x] if va_x is not None else [])
     args.out.mkdir(parents=True, exist_ok=True)
     start = time.time()
@@ -354,7 +392,7 @@ def main():
 
         model, outs = train_one(
             args, tr_x, tr_y, class_weights, eval_sets, seed, device,
-            verbose=(args.seeds == 1),
+            verbose=(args.seeds == 1), logit_offset=logit_offset,
         )
 
         te_probs.append(outs[0])
