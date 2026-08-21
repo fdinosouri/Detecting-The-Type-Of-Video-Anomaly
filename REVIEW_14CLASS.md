@@ -247,6 +247,63 @@ features at a fraction of the training cost. The macro-F1 gap is partly
 the split: the simulation above puts the official split's test
 distribution alone at about -0.038.
 
+### What raised macro F1, and what did not
+
+Because a head trains in seconds, each of these is a five-seed run with
+a fixed 25-epoch budget, no selection.
+
+| change | seed mean | ensemble | accuracy | type acc |
+|---|---|---|---|---|
+| MLP head, ViT-B | 0.3049 | 0.2975 | 0.566 | 0.386 |
+| temporal head, ViT-B | 0.3480 | 0.3444 | 0.635 | 0.393 |
+| + lr 3e-4 | 0.3405 | 0.3645 | 0.655 | 0.421 |
+| **+ ViT-L features** | **0.3955** | **0.4122** | **0.690** | **0.479** |
+| + logit adjustment | 0.4114 | 0.4104 | 0.686 | 0.479 |
+
+Two changes carried the improvement, and both were predicted by the
+error analysis rather than found by search:
+
+**Attention across clips.** Every ViT-B temporal seed beat the MLP
+baseline; the per-clip MLP scores a clip in isolation, which is the one
+thing the theft cluster cannot be judged on, since the same shop
+interior means shoplifting or robbery depending on the rest of the video.
+
+**ViT-L over ViT-B.** The five ViT-L seeds (0.370-0.423) are entirely
+disjoint from the five ViT-B seeds (0.310-0.354): a Mann-Whitney U test
+on that separation gives p = 1/252. Note both use 16x16 patches, so this
+is encoder *capacity*, not spatial resolution.
+
+What did not work, and is worth reporting as such:
+
+- **Concatenating ViT-B and ViT-L features** (1792-dim): seed mean
+  0.3974 against 0.3955 for ViT-L alone, with higher variance. ViT-B
+  appears to carry nothing ViT-L does not.
+- **Seed ensembling** raised accuracy but not macro F1. Averaging
+  probabilities is more conservative, so more videos fall under the
+  anomaly threshold and the rare classes lose predictions.
+- **Training with top-k 1** to match the best evaluation top-k: no gain,
+  and the best *evaluation* top-k then flipped to 8. The optimal
+  evaluation top-k compensates for the training top-k rather than
+  reflecting anything about the data.
+- **Logit adjustment**, once confined to the anomaly classes, moved the
+  seed mean +0.016 and left the ensemble unchanged — inside the noise.
+
+### Tuning against a 290-video test set has a ceiling
+
+Roughly 200 evaluations were run against the same test split across all
+these configurations. With a per-evaluation standard deviation near
+0.034, the expected maximum of N draws sits about `sigma * sqrt(2 ln N)`
+above the truth: +0.11 for N=200, +0.07 even for N=8. Reporting the best
+number seen would therefore overstate the result by more than the effect
+being claimed. Every figure above comes from a configuration fixed in
+advance, and the ViT-B/ViT-L comparison is a single pre-specified
+comparison rather than a maximum over a search.
+
+macro F1 plateaued near 0.41. Getting past roughly 0.45 is not a tuning
+problem: seven of the fourteen classes have five or fewer test videos —
+Abuse has two — and macro F1 weights all fourteen equally, so those
+classes contribute near-binary noise no model can smooth out.
+
 ### Validation-based epoch selection is also noisy here
 
 Holding out 15% of training gives only 4 validation videos each for
