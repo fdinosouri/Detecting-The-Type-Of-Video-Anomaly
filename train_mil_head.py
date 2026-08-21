@@ -375,10 +375,20 @@ def main():
     logit_offset = None
 
     if args.logit_adjust:
+        # Adjust only among the anomaly classes, and centre the shift so
+        # the total anomaly mass is preserved. Applying the raw
+        # -tau*log(prior) to all fourteen classes lifts every anomaly
+        # logit relative to Normal, which wrecks the first stage of the
+        # decision: accuracy fell from 0.690 to 0.472 that way. Rebalance
+        # stage two, leave stage one alone.
         prior = (counts / counts.sum()).to(device)
-        logit_offset = args.logit_adjust * torch.log(prior)
-        print(f"\nlogit adjustment tau={args.logit_adjust} "
-              f"(Normal {prior[0]:.3f} vs Shooting {prior[10]:.3f})")
+        shift = torch.zeros_like(prior)
+        log_ano = torch.log(prior[1:])
+        shift[1:] = args.logit_adjust * (log_ano - log_ano.mean())
+        logit_offset = shift
+        print(f"\nlogit adjustment tau={args.logit_adjust} across the 13 "
+              f"anomaly classes, Normal untouched")
+        print(f"  shift range {shift[1:].min():+.3f} .. {shift[1:].max():+.3f}")
 
     eval_sets = [te_x] + ([va_x] if va_x is not None else [])
     args.out.mkdir(parents=True, exist_ok=True)
