@@ -51,14 +51,35 @@ def read_annotations(paths):
     return sorted(seen.items())
 
 
-def sample_indices(total_frames, num_clips, num_frames):
-    """Split the video into num_clips segments, sample uniformly in each.
+def sample_indices(total_frames, num_clips, num_frames, stride=0):
+    """Pick the frame indices for every clip of one video.
 
-    Deterministic, so cached features match between runs and between
-    train and test.
+    With stride=0 each clip is stretched to span a full 1/num_clips
+    segment. That covers the whole video but, on a long one, hands
+    VideoMAE something it was never trained on: a 9000-frame video gives
+    clips spanning ~19 seconds with 35 frames between samples, against
+    the ~2 seconds at stride 4 the Kinetics checkpoints saw. Motion
+    across such a clip is not motion any more.
+
+    With stride > 0 each clip is a proper short window -- num_frames at
+    that stride -- and the clip *starts* are spread across the video
+    instead. Coverage per clip drops, so raise --num-clips to compensate.
+
+    Deterministic either way, so cached features match between runs.
     """
     if total_frames < 1:
         return None
+
+    if stride > 0:
+        span = (num_frames - 1) * stride
+        last = max(total_frames - 1 - span, 0)
+        starts = np.linspace(0, last, num_clips).round().astype(np.int64)
+        indices = [
+            np.clip(s + np.arange(num_frames) * stride, 0, total_frames - 1)
+            for s in starts
+        ]
+
+        return np.concatenate(indices)
 
     bounds = np.linspace(0, total_frames, num_clips + 1)
     indices = []
@@ -167,6 +188,11 @@ def main():
     parser.add_argument("--num-frames", type=int, default=16,
                         help="frames per clip; VideoMAE expects 16")
     parser.add_argument("--size", type=int, default=224)
+    parser.add_argument("--frame-stride", type=int, default=0,
+                        help="frames between samples within a clip; 4 "
+                             "matches the Kinetics checkpoints. 0 keeps "
+                             "the old behaviour of stretching each clip "
+                             "across a whole segment")
     parser.add_argument("--batch-clips", type=int, default=4,
                         help="clips per forward pass; lower it if you OOM")
     parser.add_argument("--limit", type=int, default=None,
@@ -234,7 +260,9 @@ def main():
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         cap.release()
 
-        wanted = sample_indices(total, args.num_clips, args.num_frames)
+        wanted = sample_indices(
+            total, args.num_clips, args.num_frames, args.frame_stride
+        )
 
         if wanted is None:
             failed.append(rel)
