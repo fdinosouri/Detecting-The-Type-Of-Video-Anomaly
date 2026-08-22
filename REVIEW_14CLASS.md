@@ -242,8 +242,19 @@ dropout 0.3, 25 epochs).
 | multiclass accuracy | 0.6419 | 0.6552 | **0.6897** [0.638, 0.745] |
 
 Adding mixup and the logit adjustment on top of the ViT-L features
-(see below) lifts that final column to macro F1 0.4298, anomaly-type
-accuracy 0.5000 and accuracy 0.6897.
+(see below) gives the final configuration:
+
+| metric | point | 95% CI |
+|---|---|---|
+| macro F1 | **0.4298** | [0.339, **0.503**] |
+| anomaly-type accuracy | **0.5000** | [0.420, 0.585] |
+| multiclass accuracy | **0.6897** | [0.635, 0.745] |
+| binary video-level AUC | 0.9610 | [0.938, 0.980] |
+
+Worth stating plainly rather than overclaiming: the macro-F1 interval
+reaches 0.503, so the true value may well be above 0.50 — 290 test
+videos simply cannot resolve it. The point estimate is 0.4298 and that
+is what should be reported.
 
 Frozen ViT-L beats the fine-tuned CLIP backbone on all three
 multiclass metrics, and does it on the harder official split.
