@@ -278,10 +278,35 @@ def train_one(args, tr_x, tr_y, class_weights, eval_sets, seed, device,
 
         for i in range(0, len(order), args.batch_size):
             batch = order[i:i + args.batch_size]
-            loss, _ = mil_loss(
-                model(tr_x[batch].to(device)), tr_y[batch].to(device),
-                class_weights, args.topk, args.w_smooth, args.w_sparse,
-            )
+            x = tr_x[batch].to(device)
+            y = tr_y[batch].to(device)
+
+            if args.mixup > 0:
+                # Interpolate whole videos in feature space. With 1610
+                # training videos and a head that reaches near-zero
+                # training loss by epoch 10, the head has far more
+                # capacity than the data constrains; mixup fills the gaps
+                # between videos with convex combinations rather than
+                # letting it memorise them.
+                lam = float(np.random.beta(args.mixup, args.mixup))
+                perm = torch.randperm(len(batch), device=device)
+                x = lam * x + (1.0 - lam) * x[perm]
+
+                out = model(x)
+                loss_a, _ = mil_loss(
+                    out, y, class_weights,
+                    args.topk, args.w_smooth, args.w_sparse,
+                )
+                loss_b, _ = mil_loss(
+                    out, y[perm], class_weights,
+                    args.topk, args.w_smooth, args.w_sparse,
+                )
+                loss = lam * loss_a + (1.0 - lam) * loss_b
+            else:
+                loss, _ = mil_loss(
+                    model(x), y, class_weights,
+                    args.topk, args.w_smooth, args.w_sparse,
+                )
 
             optimizer.zero_grad()
             loss.backward()
@@ -338,6 +363,9 @@ def main():
                              "anything, the epoch budget is fixed in advance")
     parser.add_argument("--w-smooth", type=float, default=0.01)
     parser.add_argument("--w-sparse", type=float, default=0.001)
+    parser.add_argument("--mixup", type=float, default=0.0,
+                        help="Beta alpha for feature-space mixup; 0.2-0.4 "
+                             "is a usual range, 0 disables it")
     parser.add_argument("--logit-adjust", type=float, default=0.0,
                         help="tau for the long-tail logit adjustment at "
                              "inference; 1.0 is the standard setting, "
