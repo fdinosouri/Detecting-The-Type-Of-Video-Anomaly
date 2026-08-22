@@ -320,6 +320,27 @@ and a sparse anomaly that falls outside every window cannot be scored at
 all. VideoMAE turns out to tolerate an unusual temporal sampling rate
 better than it tolerates never seeing the event.
 
+### Doubling the clips changed nothing either
+
+The stride experiment suggested coverage mattered more than clip
+validity, so the untried combination was the one that improves both
+axes: keep the stretched sampling (100% coverage) but double the clips,
+halving how stretched each one is and giving MIL 32 positions to find
+the anomaly in rather than 16.
+
+Re-extracting with ViT-L at 32 clips took 289 minutes and produced:
+
+| | 16 clips | 32 clips |
+|---|---|---|
+| seed mean | 0.3955 | 0.3875 |
+| ensemble macro F1 | 0.4122 | 0.4105 |
+| accuracy | 0.6897 | 0.6897 |
+| anomaly-type accuracy | 0.4786 | 0.4857 |
+
+Identical to four decimal places on accuracy. Temporal sampling
+density is not the constraint — 16 clips already locate the anomaly as
+well as 32 do.
+
 ### A diverged seed used to crash the run
 
 One seed of the stride-4 run collapsed to macro F1 0.0010 and emitted
