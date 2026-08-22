@@ -299,6 +299,36 @@ What did not work, and is worth reporting as such:
 - **Logit adjustment**, once confined to the anomaly classes, moved the
   seed mean +0.016 and left the ensemble unchanged — inside the noise.
 
+### Kinetics-style clip sampling made things worse
+
+The clips fed to VideoMAE were stretched: each spanned a full
+1/num_clips segment, so a 9000-frame video produced 16 frames covering
+~19 seconds with 35 frames between them, against the ~2 seconds at
+stride 4 the Kinetics checkpoints were trained on. That looked like a
+clear distribution mismatch worth fixing, and the fix was measured
+rather than assumed.
+
+Re-extracting with `--frame-stride 4 --num-clips 32` — proper ~2-second
+windows, twice as many of them, 116 minutes — gave **seed mean 0.3089**
+against **0.3405** for the stretched 16-clip features on the same head.
+Worse, not better, and the proportional top-k control (8 of 32 rather
+than 4 of 16) did not rescue it.
+
+So coverage beats clip validity here. Stretched clips still span the
+whole video, while 32 two-second windows reach only ~21% of a long one,
+and a sparse anomaly that falls outside every window cannot be scored at
+all. VideoMAE turns out to tolerate an unusual temporal sampling rate
+better than it tolerates never seeing the event.
+
+### A diverged seed used to crash the run
+
+One seed of the stride-4 run collapsed to macro F1 0.0010 and emitted
+NaN probabilities, which poisoned the averaged ensemble and then crashed
+`roc_auc_score` with `Input contains NaN`. Seeds with non-finite outputs
+are now dropped from the ensemble with a warning, and a run where every
+seed diverges exits with advice rather than a traceback. An unstable
+configuration should be visible as instability, not as a stack trace.
+
 ### Tuning against a 290-video test set has a ceiling
 
 Roughly 200 evaluations were run against the same test split across all

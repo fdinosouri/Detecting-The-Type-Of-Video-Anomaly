@@ -22,6 +22,7 @@ evaluate_multiclass.py --sweep and bootstrap_ci.py work on it unchanged.
 
 import argparse
 import pickle
+import sys
 import time
 from collections import Counter
 from pathlib import Path
@@ -405,6 +406,12 @@ def main():
             verbose=(args.seeds == 1), logit_offset=logit_offset,
         )
 
+        if not np.isfinite(outs[0]).all():
+            # A diverged run produces NaN probabilities, which poison the
+            # averaged ensemble and crash roc_auc_score downstream.
+            print(f"  DIVERGED (non-finite outputs) -- excluded")
+            continue
+
         te_probs.append(outs[0])
         if va_x is not None:
             va_probs.append(outs[1])
@@ -415,6 +422,16 @@ def main():
     params = sum(p.numel() for p in model.parameters())
     print(f"\nhead: {args.arch}, {params:,} trainable parameters")
     print(f"trained {args.seeds} head(s) in {time.time() - start:.0f}s")
+
+    if not te_probs:
+        sys.exit(
+            "Every seed diverged. Lower --lr, or raise --weight-decay."
+        )
+
+    if len(te_probs) < args.seeds:
+        print(f"WARNING: {args.seeds - len(te_probs)} of {args.seeds} seeds "
+              f"diverged and were excluded; the remaining {len(te_probs)} "
+              f"are averaged. Treat this configuration as unstable.")
 
     probs = np.mean(te_probs, axis=0)
     scores = {name: [probs[i]] for i, name in enumerate(te_names)}
