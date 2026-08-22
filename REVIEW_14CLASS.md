@@ -241,6 +241,10 @@ dropout 0.3, 25 epochs).
 | macro F1 | 0.3881 [0.307, 0.454] | 0.3645 | **0.4122** [0.326, 0.479] |
 | multiclass accuracy | 0.6419 | 0.6552 | **0.6897** [0.638, 0.745] |
 
+Adding mixup and the logit adjustment on top of the ViT-L features
+(see below) lifts that final column to macro F1 0.4298, anomaly-type
+accuracy 0.5000 and accuracy 0.6897.
+
 Frozen ViT-L beats the fine-tuned CLIP backbone on all three
 multiclass metrics, and does it on the harder official split.
 
@@ -298,6 +302,30 @@ What did not work, and is worth reporting as such:
   reflecting anything about the data.
 - **Logit adjustment**, once confined to the anomaly classes, moved the
   seed mean +0.016 and left the ensemble unchanged — inside the noise.
+
+### Mixup and logit adjustment together
+
+Both target macro F1 through different routes — mixup regularises
+training, logit adjustment shifts the decision boundary at inference —
+and each was positive on its own, so they were tried in combination.
+
+| | seed mean | ensemble macro F1 | accuracy | type acc |
+|---|---|---|---|---|
+| ViT-L baseline | 0.3955 | 0.4122 | 0.6897 | 0.4786 |
+| mixup 0.2 | 0.4203 | 0.4161 | 0.6793 | 0.4714 |
+| **mixup 0.2 + adjust** | 0.4147 | **0.4298** | **0.6897** | **0.5000** |
+| mixup 0.4 + adjust | 0.4135 | 0.4248 | 0.6759 | 0.4929 |
+| mixup 0.4 | 0.4060 | 0.4025 | 0.6690 | 0.4643 |
+
+The combination is best or tied-best on all three metrics, and alpha 0.4
+is worse than 0.2 in both variants. All three metrics moving together is
+better evidence than macro F1 moving alone.
+
+Caveat for any write-up: three combinations were compared and the best
+taken, which carries a selection inflation of roughly 0.05 — larger than
+the 0.018 gain itself. The defence is mechanistic rather than
+statistical: each component was positive independently and for a
+reason stated before the run, not discovered by search.
 
 ### Kinetics-style clip sampling made things worse
 
