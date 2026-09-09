@@ -104,6 +104,11 @@ def scores_to_prediction(
 
     Stage 2 (which anomaly?): only the top-k most anomalous clips
     vote, by averaging their probabilities over classes 1..13.
+
+    The stage-2 vote vector (classes 1..13, in that order) is returned
+    as well, because a class with zero F1 cannot be diagnosed from the
+    argmax alone: it matters whether the true class came second in that
+    vote or ninth.
     """
     scores = np.asarray(scores, dtype=np.float32)
 
@@ -131,7 +136,137 @@ def scores_to_prediction(
     else:
         predicted_class = anomaly_class
 
-    return predicted_class, anomaly_class, video_anomaly_score
+    return predicted_class, anomaly_class, video_anomaly_score, class_scores
+
+
+EPSILON = 1e-12
+
+
+def class_diagnostics(
+    y_true,
+    y_pred,
+    y_anomaly_class,
+    y_class_scores,
+    log=print,
+):
+    """Explain a per-class F1 of 0.0000 instead of just reporting it.
+
+    A dead class has three possible causes, and they need different
+    fixes, so the report has to tell them apart:
+
+    1. *Stage 1 ate it.* The video never passed the anomaly threshold,
+       so it was called Normal and the type vote was discarded. Fix the
+       threshold, not the classifier.
+    2. *The vote is close.* The true class is ranked second or third in
+       the stage-2 vote, losing by a small margin. A per-class bias --
+       the logit adjustment, or a different class-weight scheme -- can
+       recover it, and the `boost` column says exactly how much is
+       needed and how many other videos it would cost.
+    3. *The vote is not close.* The true class ranks eighth of thirteen.
+       No re-weighting recovers that; the features do not carry the
+       distinction.
+
+    `y_class_scores` is the stage-2 vote matrix, [videos, 13], columns
+    ordered as classes 1..13.
+    """
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+    y_anomaly_class = np.asarray(y_anomaly_class)
+    scores = np.asarray(y_class_scores, dtype=np.float64)
+
+    if scores.ndim != 2 or scores.shape[1] != len(CLASS_NAMES) - 1:
+        log("Per-class diagnosis needs the stage-2 vote matrix; skipping.")
+        return {}
+
+    log("=" * 78)
+    log("Per-class diagnosis (anomaly classes only)")
+    log("")
+    log(f"{'class':15s} {'sup':>4s} {'pred':>5s} {'TP':>3s} "
+        f"{'norm':>5s} {'r=1':>4s} {'r<=3':>5s} {'med r':>6s} {'margin':>7s}")
+
+    log_scores = np.log(np.clip(scores, EPSILON, None))
+    report = {}
+
+    for class_id in range(1, len(CLASS_NAMES)):
+        column = class_id - 1
+        is_true = y_true == class_id
+        support = int(is_true.sum())
+
+        if support == 0:
+            continue
+
+        # How often the true class wins, and by how much it loses when
+        # it does not. The margin is in log space, so it is directly
+        # comparable to the logit adjustment's per-class shift.
+        rows = log_scores[is_true]
+        own = rows[:, column]
+        other = np.delete(rows, column, axis=1).max(axis=1)
+        margins = other - own
+        ranks = 1 + (rows > own[:, None]).sum(axis=1)
+
+        blocked = int(((y_pred == 0) & is_true).sum())
+        positive = margins[margins > 0]
+        needed = float(np.median(positive)) if positive.size else 0.0
+
+        report[CLASS_NAMES[class_id]] = {
+            "support": support,
+            "predicted": int((y_pred == class_id).sum()),
+            "true_positives": int(((y_pred == class_id) & is_true).sum()),
+            "blocked_by_threshold": blocked,
+            "median_rank": float(np.median(ranks)),
+            "median_margin": needed,
+        }
+
+        log(f"{CLASS_NAMES[class_id]:15s} {support:4d} "
+            f"{int((y_pred == class_id).sum()):5d} "
+            f"{int(((y_pred == class_id) & is_true).sum()):3d} "
+            f"{blocked:5d} {int((ranks == 1).sum()):4d} "
+            f"{int((ranks <= 3).sum()):5d} {np.median(ranks):6.1f} "
+            f"{needed:7.2f}")
+
+    log("")
+    log("sup = true videos, pred = times predicted, norm = called Normal by")
+    log("stage 1, r = rank of the true class in the stage-2 vote, margin =")
+    log("log-space boost that class needs to win the videos it currently")
+    log("loses. A class with median rank 1-2 is a calibration problem; one")
+    log("with median rank above ~4 is a feature problem.")
+    log("")
+    log("What a per-class boost would buy (applied to that class alone):")
+    log("")
+    log(f"{'class':15s} {'boost':>6s} {'gained':>7s} {'lost':>6s} {'net':>5s}")
+
+    for class_id in range(1, len(CLASS_NAMES)):
+        name = CLASS_NAMES[class_id]
+
+        if name not in report or report[name]["median_margin"] <= 0:
+            continue
+
+        boost = report[name]["median_margin"] + 1e-6
+        shifted = log_scores.copy()
+        shifted[:, class_id - 1] += boost
+        new_class = 1 + shifted.argmax(axis=1)
+
+        # Stage 1 is untouched: a video below the anomaly threshold
+        # stays Normal however the type vote is shifted.
+        new_pred = np.where(y_pred == 0, 0, new_class)
+
+        gained = int(((new_pred == y_true) & (y_pred != y_true)).sum())
+        lost = int(((new_pred != y_true) & (y_pred == y_true)).sum())
+
+        report[name]["boost_gained"] = gained
+        report[name]["boost_lost"] = lost
+
+        log(f"{name:15s} {boost:6.2f} {gained:7d} {lost:6d} "
+            f"{gained - lost:5d}")
+
+    log("")
+    log("Each row is that class's boost applied on its own, at the median")
+    log("margin above. Fit any boost on validation data, never on this")
+    log("table -- these are test videos, and with 3-8 videos per class the")
+    log("gain is one or two videos wide.")
+    log("=" * 78)
+
+    return report
 
 
 def evaluate_from_scores(
@@ -140,6 +275,7 @@ def evaluate_from_scores(
     anomaly_threshold=ANOMALY_THRESHOLD,
     top_k=TOP_K,
     log=print,
+    diagnose=False,
 ):
     if not isinstance(predictions, dict):
         raise TypeError(
@@ -152,6 +288,7 @@ def evaluate_from_scores(
     y_pred = []
     y_anomaly_class = []
     y_anomaly_score = []
+    y_class_scores = []
     matched_names = []
     missing_predictions = []
     unknown_prediction_keys = []
@@ -163,7 +300,12 @@ def evaluate_from_scores(
             unknown_prediction_keys.append(prediction_key)
             continue
 
-        predicted_class, anomaly_class, anomaly_score = scores_to_prediction(
+        (
+            predicted_class,
+            anomaly_class,
+            anomaly_score,
+            class_scores,
+        ) = scores_to_prediction(
             scores,
             anomaly_threshold=anomaly_threshold,
             top_k=top_k,
@@ -173,6 +315,7 @@ def evaluate_from_scores(
         y_pred.append(predicted_class)
         y_anomaly_class.append(anomaly_class)
         y_anomaly_score.append(anomaly_score)
+        y_class_scores.append(class_scores)
         matched_names.append(video_name)
 
     prediction_names = {
@@ -193,6 +336,7 @@ def evaluate_from_scores(
     y_pred = np.asarray(y_pred, dtype=np.int64)
     y_anomaly_class = np.asarray(y_anomaly_class, dtype=np.int64)
     y_anomaly_score = np.asarray(y_anomaly_score, dtype=np.float64)
+    y_class_scores = np.asarray(y_class_scores, dtype=np.float64)
 
     accuracy = accuracy_score(y_true, y_pred)
     correct = int((y_true == y_pred).sum())
@@ -242,6 +386,11 @@ def evaluate_from_scores(
     log("Confusion Matrix (rows: true, columns: predicted):")
     log("\n" + np.array2string(matrix))
 
+    if diagnose:
+        class_diagnostics(
+            y_true, y_pred, y_anomaly_class, y_class_scores, log=log
+        )
+
     wrong_indices = np.where(y_true != y_pred)[0]
 
     log(f"Wrong Predictions: {len(wrong_indices)}")
@@ -277,6 +426,7 @@ def evaluate_from_scores(
         "y_pred": y_pred,
         "y_anomaly_class": y_anomaly_class,
         "y_anomaly_score": y_anomaly_score,
+        "y_class_scores": y_class_scores,
         "confusion_matrix": matrix,
     }
 
@@ -287,6 +437,13 @@ def main():
     parser.add_argument("--annotations", type=Path, default=ANNOTATION_FILE)
     parser.add_argument("--threshold", type=float, default=ANOMALY_THRESHOLD)
     parser.add_argument("--topk", type=int, default=TOP_K)
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="explain each class's score: how often it was blocked by the "
+             "anomaly threshold, where the true class ranked in the type "
+             "vote, and what a per-class boost would gain or cost",
+    )
     parser.add_argument(
         "--sweep",
         action="store_true",
@@ -366,6 +523,7 @@ def main():
         args.annotations,
         anomaly_threshold=args.threshold,
         top_k=args.topk,
+        diagnose=args.diagnose,
     )
 
 

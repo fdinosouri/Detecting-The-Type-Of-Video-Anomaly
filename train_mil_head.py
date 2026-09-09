@@ -211,10 +211,18 @@ def mil_loss(logits, labels, class_weights, top_k, w_smooth, w_sparse):
     return loss + w_smooth * smoothed + w_sparse * sparsity, loss
 
 
-def build_class_weights(labels, num_classes, device):
+def build_class_weights(labels, num_classes, device, power=1.0):
+    """Inverse-frequency loss weights, raised to `power`.
+
+    power=1 is plain inverse frequency, power=0.5 the square-root
+    variant, power=0 no weighting at all. The exponent matters when a
+    balanced sampler is also on: oversampling and weighting correct the
+    same imbalance, and applying both at full strength over-predicts the
+    rare classes instead of fixing them.
+    """
     counts = torch.bincount(labels, minlength=num_classes).float()
     counts = counts.clamp(min=1.0)
-    weights = counts.sum() / (num_classes * counts)
+    weights = (counts.sum() / (num_classes * counts)).pow(power)
     weights = weights / weights.mean()
 
     return counts, torch.clamp(weights, 0.25, 4.0).to(device)
@@ -270,10 +278,31 @@ def train_one(args, tr_x, tr_y, class_weights, eval_sets, seed, device,
     )
 
     order = np.arange(len(tr_y))
+    sample_p = None
+
+    if getattr(args, "balanced_sampler", False):
+        # Assault has ~47 training videos against Normal's ~800, so in a
+        # 32-video batch it appears in roughly one batch in two and the
+        # head can reach a good loss without ever separating it. Sampling
+        # each video with probability 1/count(class) puts every class in
+        # every batch in expectation; the epoch keeps the same number of
+        # updates, they are just drawn with replacement.
+        class_counts = np.bincount(
+            tr_y.numpy(), minlength=len(CLASS_NAMES)
+        ).astype(np.float64)
+        sample_p = 1.0 / np.clip(class_counts, 1.0, None)[tr_y.numpy()]
+        sample_p = sample_p / sample_p.sum()
 
     for epoch in range(args.epochs):
         model.train()
-        np.random.shuffle(order)
+
+        if sample_p is None:
+            np.random.shuffle(order)
+        else:
+            order = np.random.choice(
+                len(tr_y), size=len(tr_y), replace=True, p=sample_p
+            )
+
         total, seen = 0.0, 0
 
         for i in range(0, len(order), args.batch_size):
@@ -361,6 +390,16 @@ def main():
                         help="hold out this much of training and report a "
                              "validation score; it is never used to select "
                              "anything, the epoch budget is fixed in advance")
+    parser.add_argument("--balanced-sampler", action="store_true",
+                        help="draw training videos with probability "
+                             "1/class-count, so rare classes appear in every "
+                             "batch; pair it with a lower "
+                             "--class-weight-power to avoid correcting the "
+                             "same imbalance twice")
+    parser.add_argument("--class-weight-power", type=float, default=1.0,
+                        help="exponent on the inverse-frequency loss "
+                             "weights: 1 = plain inverse frequency, "
+                             "0.5 = square root, 0 = unweighted")
     parser.add_argument("--w-smooth", type=float, default=0.01)
     parser.add_argument("--w-sparse", type=float, default=0.001)
     parser.add_argument("--mixup", type=float, default=0.0,
@@ -394,8 +433,17 @@ def main():
               f"score, fitting on {len(fit_idx)}")
 
     counts, class_weights = build_class_weights(
-        tr_y, len(CLASS_NAMES), device
+        tr_y, len(CLASS_NAMES), device, power=args.class_weight_power
     )
+
+    if args.balanced_sampler:
+        print("\nbalanced sampler on: videos drawn with probability "
+              "1/class-count")
+
+        if args.class_weight_power >= 1.0:
+            print("  NOTE: the loss weights are still at full inverse "
+                  "frequency, so the imbalance is corrected twice. "
+                  "--class-weight-power 0 or 0.5 is the intended pairing.")
     print("\nclass counts / loss weights:")
     for c in range(len(CLASS_NAMES)):
         print(f"  {c:2d} {CLASS_NAMES[c]:15s} count={int(counts[c]):4d} "
@@ -418,6 +466,16 @@ def main():
         print(f"\nlogit adjustment tau={args.logit_adjust} across the 13 "
               f"anomaly classes, Normal untouched")
         print(f"  shift range {shift[1:].min():+.3f} .. {shift[1:].max():+.3f}")
+        print("  (subtracted from the logit, so a positive shift is a "
+              "penalty: the")
+        print("   most frequent anomaly classes in training are the ones "
+              "held back,")
+        print("   which is how a head class such as Robbery can stop being "
+              "predicted)")
+
+        for c in range(1, len(CLASS_NAMES)):
+            print(f"    {CLASS_NAMES[c]:15s} count={int(counts[c]):4d} "
+                  f"shift={shift[c]:+.3f}")
 
     eval_sets = [te_x] + ([va_x] if va_x is not None else [])
     args.out.mkdir(parents=True, exist_ok=True)

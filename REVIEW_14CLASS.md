@@ -483,6 +483,75 @@ if config.TEST.NUM_CROP == 3:
 replaces index 0 with a `multiview` `SampleFrames`, which the pipeline
 supports.
 
+## Diagnosing a class that scores 0.0000
+
+A per-class F1 of exactly zero says the class was never predicted
+correctly, and nothing else. Three different failures produce that same
+zero and each needs a different fix, so `evaluate_multiclass.py
+--diagnose` separates them:
+
+```
+python evaluate_multiclass.py --scores exp_mae/test_scores.pkl \
+    --annotations labels/UCF_std_test.txt --diagnose
+```
+
+For every anomaly class it prints the support, how often the class was
+predicted, how many of its videos stage 1 threw out as Normal, where the
+true class ranked in the stage-2 vote, and the log-space margin by which
+it lost.
+
+- **`norm` is most of the support.** Stage 1 rejected those videos
+  before the type vote was ever read, so the type head is not at fault.
+  Lower `--threshold`, or check the anomaly evidence for that class.
+- **Median rank 1-2, small margin.** The class is competitive and loses
+  narrowly. This is calibration: a per-class bias fixes it, and the
+  second table says how many videos the fix gains and how many it costs.
+- **Median rank above ~4.** No re-weighting will recover it. The
+  features do not carry the distinction, which is the theft-cluster
+  problem described above.
+
+The boost table is deliberately not wired to a `--boost` flag. Fitting
+per-class offsets on 290 test videos is exactly the test-set tuning the
+noise-floor section warns about; fit them on held-out data
+(`--val-frac`) or use the principled version, the logit adjustment.
+
+### The logit adjustment can be what kills a head class
+
+`--logit-adjust` subtracts `tau * (log prior - mean log prior)` across
+the 13 anomaly classes, so the *most frequent* anomaly classes in
+training are the ones penalised. In the official UCF-Crime split
+Robbery is the largest anomaly class, so it takes the largest penalty
+while Shooting and Explosion are lifted. That is the intended trade for
+macro F1, but it can push a class with a handful of test videos from a
+few correct predictions to none.
+
+`train_mil_head.py` now prints the per-class shift next to the per-class
+count, so the size of that penalty is visible before the run rather than
+inferred from the report afterwards. If a head class dies at tau=1.0,
+the honest response is a lower tau, not a per-class exception.
+
+### Rare classes and the size of their gradient
+
+Two knobs address the training side of the same problem:
+
+- `--balanced-sampler` draws training videos with probability
+  `1 / class-count`, so a class with ~47 videos appears in every batch
+  in expectation rather than in every other batch. The number of updates
+  per epoch is unchanged; only the sampling distribution is.
+- `--class-weight-power` sets the exponent on the inverse-frequency loss
+  weights: 1 is the current behaviour, 0.5 the square root, 0 unweighted.
+
+They correct the same imbalance by different routes, so running both at
+full strength double-corrects it — the mistake the recommendations
+below already flag for the balanced split. The intended pairing is
+`--balanced-sampler --class-weight-power 0` or `0.5`, and the script
+prints a warning if the sampler is on while the weights are at full
+strength.
+
+Neither knob has been measured yet on this dataset. Given the noise
+floor (~0.075 macro F1 on a 290-video split), a five-seed run against
+the current configuration is the minimum evidence for keeping either.
+
 ## Recommendations (not changed in code)
 
 - **Don't double-correct class imbalance.** The balanced train file already
