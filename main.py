@@ -295,14 +295,20 @@ def build_class_weights(config, device):
     num_classes = config.DATA.NUM_CLASSES
     counts = torch.zeros(num_classes, dtype=torch.float32)
 
+    from evaluate_multiclass import parse_annotation_label
+
     with open(config.DATA.TRAIN_FILE, "r", encoding="utf-8") as fin:
         for line in fin:
             parts = line.strip().split()
 
-            if len(parts) < 2:
+            if len(parts) < 3:
                 continue
 
-            label = int(parts[-1])
+            # parts[-1] is only the label in the 4-column split files; the
+            # standard 7-column annotations keep it in parts[2], so reading
+            # the last column there counts every video into the wrong class
+            # and the weights come out backwards.
+            label = parse_annotation_label(parts)
 
             if 0 <= label < num_classes:
                 counts[label] += 1
