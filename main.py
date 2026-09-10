@@ -57,8 +57,7 @@ def evaluate_video_level_auc(vid2abnormality, anno_file):
     if len(set(y_true)) < 2:
         raise RuntimeError('AUC needs both Normal and Anomaly videos, but only one class was found.')
 
-    auc = roc_auc_score(y_true, y_score)
-    return auc, auc
+    return roc_auc_score(y_true, y_score)
 
 from utils.cluster import ClusterLoss, Normalize, BCE, PairEnum
 from datasets.build import build_dataloader
@@ -243,8 +242,8 @@ def main(config):
             tmp_dict[video_name] = [anomaly_score]
 
         try:
-            auc_all_p, auc_ano_p = evaluate_video_level_auc(tmp_dict, config.DATA.VAL_FILE)
-            logger.info(f'AUC: [{auc_all_p:.3f}/{auc_ano_p:.3f}]\t')
+            auc = evaluate_video_level_auc(tmp_dict, config.DATA.VAL_FILE)
+            logger.info(f'Binary video-level AUC: {auc:.4f}')
         except Exception as e:
             logger.info(f"Skipping AUC evaluation because: {e}")
 
