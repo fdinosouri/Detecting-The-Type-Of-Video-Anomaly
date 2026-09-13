@@ -27,6 +27,7 @@ sys.path.insert(0, str(HERE))
 import build_thesis as B
 import content_report_fa as RC
 from docx_style import add_section, set_footer_page_number, set_header_text
+from glossary import annotate
 
 OUTPUT = HERE / "Report_HUT_VideoAnomaly.docx"
 
@@ -105,6 +106,7 @@ class ReportBuilder(B.Builder):
         self.abstract_en()
         self.title_page_en()
 
+        self.notes.attach(self.doc)
         self.doc.save(OUTPUT)
 
         return OUTPUT
@@ -113,7 +115,7 @@ class ReportBuilder(B.Builder):
 def main():
     # The inherited front matter, contents and references read their text
     # from build_thesis's content module, so point it at the report's.
-    B.C = RC
+    B.C = annotate(RC)
 
     path = ReportBuilder().build()
     size = path.stat().st_size / 1024

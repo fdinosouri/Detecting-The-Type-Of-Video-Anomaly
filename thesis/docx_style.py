@@ -28,6 +28,7 @@ SIZE_H2 = (16, 14)
 SIZE_H3 = (14, 13)
 SIZE_H4 = (13, 12)
 SIZE_CAPTION = (13, 12)
+SIZE_FOOTNOTE = (11, 10)
 SIZE_TABLE = (13, 11)
 SIZE_HEADER = (11, 11)
 SIZE_FOOTNOTE = (10, 10)
@@ -315,6 +316,21 @@ def build_styles(doc):
     _style_paragraph(listing, space_after=6, space_before=0, line=1.5,
                      align=WD_ALIGN_PARAGRAPH.JUSTIFY)
     listing.paragraph_format.right_indent = Cm(0.8)
+
+    # Footnotes carry the Latin original of a term given in Persian in the
+    # body. Word looks these two styles up by their fixed style ids, so the
+    # names must be exactly "Footnote Text" and "Footnote Reference".
+    note = new("Footnote Text")
+    _style_font(note, SIZE_FOOTNOTE)
+    _style_paragraph(note, space_after=0, space_before=0, line=1.0,
+                     align=WD_ALIGN_PARAGRAPH.RIGHT)
+
+    try:
+        mark = styles.add_style("Footnote Reference", WD_STYLE_TYPE.CHARACTER)
+    except ValueError:
+        mark = styles["Footnote Reference"]
+
+    _set(mark.element.get_or_add_rPr(), "w:vertAlign", val="superscript")
 
     return doc
 

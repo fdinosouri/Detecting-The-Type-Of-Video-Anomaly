@@ -28,6 +28,7 @@ from docx.shared import Cm, Pt
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import content_fa as C
+from footnotes import FootnoteStore, split_footnotes
 from docx_style import (
     EN, FA, SIZE_BODY, SIZE_CAPTION, SIZE_TABLE,
     _el, _set, add_field, add_page_break, add_section, build_styles,
@@ -85,6 +86,7 @@ class Builder:
         self.figure_no = 0
         self.eq_no = 0
         self.after_heading = False
+        self.notes = FootnoteStore()
 
     # ------------------------------------------------------------------
     # primitives
@@ -115,10 +117,21 @@ class Builder:
             if paragraph.runs:
                 paragraph.add_run().add_break()
 
-            run = paragraph.add_run(bidi_safe(chunk) if rtl else chunk)
-            set_run_font(run, sizes, bold=bold, rtl=rtl)
+            self.emit(paragraph, chunk, sizes, bold=bold, rtl=rtl)
 
         return paragraph
+
+    def emit(self, paragraph, text, sizes, *, bold=False, rtl=True):
+        """Write text into a paragraph, turning ⟨…⟩ spans into footnotes."""
+        for piece, note in split_footnotes(text):
+            if piece:
+                run = paragraph.add_run(bidi_safe(piece) if rtl else piece)
+                set_run_font(run, sizes, bold=bold, rtl=rtl)
+
+            if note is not None:
+                self.notes.reference(
+                    paragraph, self.notes.add(note), sizes[1]
+                )
 
     def blank(self, count=1):
         for _ in range(count):
@@ -141,8 +154,7 @@ class Builder:
         rtl_paragraph(paragraph)
 
         sizes = {2: (16, 14), 3: (14, 13), 4: (13, 12)}[level]
-        run = paragraph.add_run(bidi_safe(f"{number} {text}"))
-        set_run_font(run, sizes, bold=True)
+        self.emit(paragraph, f"{number} {text}", sizes, bold=True)
 
         self.after_heading = True
 
@@ -156,8 +168,7 @@ class Builder:
 
         cap = self.doc.add_paragraph(style="Table Title*")
         rtl_paragraph(cap)
-        run = cap.add_run(bidi_safe(label))
-        set_run_font(run, SIZE_CAPTION, bold=True)
+        self.emit(cap, label, SIZE_CAPTION, bold=True)
 
         table = self.doc.add_table(rows=1, cols=len(headers))
         table.style = "Table Grid"
@@ -198,8 +209,7 @@ class Builder:
         else:
             ltr_paragraph(paragraph)
 
-        run = paragraph.add_run(bidi_safe(text) if rtl else text)
-        set_run_font(run, SIZE_TABLE, bold=bold, rtl=rtl)
+        self.emit(paragraph, text, SIZE_TABLE, bold=bold, rtl=rtl)
 
     def figure(self, filename, caption):
         path = FIGURES / filename
@@ -217,10 +227,8 @@ class Builder:
 
         cap = self.doc.add_paragraph(style="Pic Title*")
         rtl_paragraph(cap)
-        run = cap.add_run(bidi_safe(
-            f"شکل {self.prefix}-{fa_num(self.figure_no)}  {caption}"
-        ))
-        set_run_font(run, SIZE_CAPTION, bold=True)
+        self.emit(cap, f"شکل {self.prefix}-{fa_num(self.figure_no)}  {caption}",
+                  SIZE_CAPTION, bold=True)
         self.after_heading = False
 
     def equation(self, text):
@@ -450,7 +458,8 @@ class Builder:
             rtl_paragraph(paragraph)
             add_field(
                 paragraph, instruction,
-                "برای نمایش این فهرست، در Word کلیدهای Ctrl+A و سپس F9 را بزنید.",
+                "برای نمایش این فهرست، در واژه‌پرداز کل متن را انتخاب کرده و "
+                "کلید به‌روزرسانی میدان‌ها را بزنید.",
             )
 
         add_page_break(self.doc)
@@ -650,6 +659,7 @@ class Builder:
         self.abstract_en()
         self.title_page_en()
 
+        self.notes.attach(self.doc)
         self.doc.save(OUTPUT)
 
         return OUTPUT
