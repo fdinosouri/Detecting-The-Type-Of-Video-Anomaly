@@ -67,6 +67,7 @@ THEMES = {
         BAND=0xEDF1F8, RULE=0xD9E0EC, HILITE=0xFFF2DC, ONACCENT=0x1B1300,
         DEEP2=0x24427D, GOOD_TINT=0x7FD3CC, ACCENT_TINT=0xF5C27A,
         DARK=False, TITLE=0x16264F, PANEL=0xFFFFFF, BAR=0x16264F,
+        GHOST=0xE7ECF5,
         GRID=0xE4E9F2, AXIS=0xC7D0E0, FAINT=0x8FA6D4,
     ),
     # A deck lit from the dark side: plum ground throughout, rose for
@@ -81,6 +82,7 @@ THEMES = {
         BAND=0x361428, RULE=0x4A1B38, HILITE=0x5A1F3E, ONACCENT=0x2E1020,
         GOOD_TINT=0x9FE6D2, ACCENT_TINT=0xFFA0C4,
         GRID=0x45203A, AXIS=0x6B3352, FAINT=0x9C7186, BAR=0x7C3C63,
+        GHOST=0x3B1729,
     ),
 }
 
@@ -112,6 +114,7 @@ PANEL = _rgb(_P["PANEL"])
 DARK = _P["DARK"]
 ACCENT = AMBER          # the accent reads better by name in layout code
 BAR = _rgb(_P["BAR"])
+GHOST = _rgb(_P["GHOST"])
 GOOD_TINT = _rgb(_P["GOOD_TINT"])
 ACCENT_TINT = _rgb(_P["ACCENT_TINT"])
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
@@ -207,7 +210,9 @@ def card(slide, x, y, w, h, fill=None, *, line=RULE):
     if fill is None:
         fill = PANEL
 
-    return shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h, fill,
+    corner = MSO_SHAPE.RECTANGLE if DARK else MSO_SHAPE.ROUNDED_RECTANGLE
+
+    return shape(slide, corner, x, y, w, h, fill,
                  line=None if DARK else line)
 
 
@@ -336,6 +341,9 @@ def bullets(slide, x, y, w, items, *, size=13, color=INK, spacing=19):
                    size=size, color=color, spacing=spacing, space_after=7)
 
 
+_COUNT = [0]
+
+
 def dark_slide():
     slide = prs.slides.add_slide(BLANK)
     slide.background.fill.solid()
@@ -349,11 +357,29 @@ def light_slide(title, kicker=None):
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = LIGHT
 
-    textbox(slide, 0.6, 0.45, 12.1, 0.8, title, size=29, bold=True,
+    if not DARK:
+        textbox(slide, 0.6, 0.45, 12.1, 0.8, title, size=29, bold=True,
+                color=TITLE)
+
+        if kicker:
+            textbox(slide, 0.6, 1.24, 12.1, 0.32, kicker, size=12.5,
+                    bold=True, color=AMBER)
+
+        return slide
+
+    # The dark design hangs the title in a panel at the reading corner and
+    # leaves the opposite corner to an oversized slide number, so the top
+    # of the slide is asymmetric rather than a full-width band.
+    _COUNT[0] += 1
+    textbox(slide, 0.55, 0.2, 2.2, 1.3, f"{_COUNT[0]:02d}", size=58,
+            bold=True, color=GHOST, rtl=False, align=PP_ALIGN.LEFT)
+
+    shape(slide, MSO_SHAPE.RECTANGLE, 5.2, 0.32, 7.55, 1.14, PANEL)
+    textbox(slide, 5.5, 0.45, 6.95, 0.55, title, size=24, bold=True,
             color=TITLE)
 
     if kicker:
-        textbox(slide, 0.6, 1.24, 12.1, 0.32, kicker, size=12.5, bold=True,
+        textbox(slide, 5.5, 1.04, 6.95, 0.3, kicker, size=11.5, bold=True,
                 color=AMBER)
 
     return slide
