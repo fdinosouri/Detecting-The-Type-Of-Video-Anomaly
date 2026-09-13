@@ -8,11 +8,14 @@ Two styles, one set of slides. THEMES holds the palette and a DARK flag,
 and the layout primitives branch on that flag, so the two differ in
 structure and not only in colour:
 
-    navy   light ground, kicker over the title, badged step numbers,
-           bordered white cards, a solid header band on every table
-    rose   plum ground throughout, kicker under the title, bare numerals
-           for steps, flat panels, tables ruled by row with the header
-           set in the accent rather than filled
+    navy   light ground, title across the full width with the kicker
+           over it, badged step numbers, bordered white cards, a solid
+           header band on every table
+    rose   white ground in pastel rose, title hung in a panel at the
+           reading corner with an oversized slide number opposite, the
+           kicker under the title, bare numerals for steps, square flat
+           panels, tables ruled by row with the header set in the accent
+           rather than filled
 
 The rose style exists because the navy one reads as the common template
 for this kind of talk. Where a deck has to look unlike its neighbours,
@@ -67,22 +70,24 @@ THEMES = {
         BAND=0xEDF1F8, RULE=0xD9E0EC, HILITE=0xFFF2DC, ONACCENT=0x1B1300,
         DEEP2=0x24427D, GOOD_TINT=0x7FD3CC, ACCENT_TINT=0xF5C27A,
         DARK=False, TITLE=0x16264F, PANEL=0xFFFFFF, BAR=0x16264F,
-        GHOST=0xE7ECF5,
+        GHOST=0xE7ECF5, SECTION=0xE8A33D,
+        SECTION_BG=0x16264F, SECTION_FG=0xFFFFFF,
         GRID=0xE4E9F2, AXIS=0xC7D0E0, FAINT=0x8FA6D4,
     ),
-    # A deck lit from the dark side: plum ground throughout, rose for
-    # every highlight, panels instead of cards, numerals instead of
-    # badges, and tables ruled rather than banded.
+    # White ground, pastel rose for everything on it. Keeps the second
+    # layout — title panel in the reading corner, oversized slide number
+    # opposite, bare numerals, ruled tables — and only swaps the palette.
     "rose": dict(
         DARK=True,
-        NAVY=0x220B18, DEEP=0x4A1B38, DEEP2=0x6B2750, ICE=0xF6CFDE,
-        ACCENT=0xFF6FA5, GOOD=0x7FD8C0, WARN=0xFF8A80,
-        LIGHT=0x2E1020, TITLE=0xFBEEF4, INK=0xF0DCE6, MUTED=0xB58FA2,
-        PANEL=0x3D1730, CARD=0x4A1B38, COOL=0x1F3A38, ALERT=0x4A1520,
-        BAND=0x361428, RULE=0x4A1B38, HILITE=0x5A1F3E, ONACCENT=0x2E1020,
-        GOOD_TINT=0x9FE6D2, ACCENT_TINT=0xFFA0C4,
-        GRID=0x45203A, AXIS=0x6B3352, FAINT=0x9C7186, BAR=0x7C3C63,
-        GHOST=0x3B1729,
+        NAVY=0xA93C74, DEEP=0xF9E2EE, DEEP2=0xF3CCE0, ICE=0xC9799F,
+        ACCENT=0xD94F8C, GOOD=0x4E9E90, WARN=0xD4596B,
+        LIGHT=0xFFFFFF, TITLE=0x9E3C67, INK=0x4A2A38, MUTED=0x9B7A88,
+        PANEL=0xFCEEF4, CARD=0xF9DFEA, COOL=0xE4F1EE, ALERT=0xFCE7EA,
+        BAND=0xFDF4F8, RULE=0xEFD8E4, HILITE=0xF7D9E7, ONACCENT=0xFFFFFF,
+        GOOD_TINT=0x3E8478, ACCENT_TINT=0xC53D7C,
+        GRID=0xF2E3EA, AXIS=0xE0C6D4, FAINT=0xE9BFD4,
+        BAR=0xE9A8C6, GHOST=0xF7E9F0, SECTION=0xD94F8C,
+        SECTION_BG=0xFFFFFF, SECTION_FG=0x9E3C67,
     ),
 }
 
@@ -115,6 +120,9 @@ DARK = _P["DARK"]
 ACCENT = AMBER          # the accent reads better by name in layout code
 BAR = _rgb(_P["BAR"])
 GHOST = _rgb(_P["GHOST"])
+SECTION = _rgb(_P["SECTION"])
+SECTION_BG = _rgb(_P["SECTION_BG"])
+SECTION_FG = _rgb(_P["SECTION_FG"])
 GOOD_TINT = _rgb(_P["GOOD_TINT"])
 ACCENT_TINT = _rgb(_P["ACCENT_TINT"])
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
@@ -219,7 +227,7 @@ def card(slide, x, y, w, h, fill=None, *, line=RULE):
 def dot(slide, x, y, number, fill=NAVY):
     if DARK:
         # no badge: the numeral carries the step on its own
-        tint = {NAVY: ICE, AMBER: ACCENT_TINT, RED: RED}.get(fill, fill)
+        tint = {NAVY: TITLE, AMBER: ACCENT}.get(fill, fill)
 
         return textbox(slide, x - 0.2, y - 0.1, 0.9, 0.62, str(number),
                        size=27, bold=True, color=tint, rtl=False,
@@ -347,7 +355,7 @@ _COUNT = [0]
 def dark_slide():
     slide = prs.slides.add_slide(BLANK)
     slide.background.fill.solid()
-    slide.background.fill.fore_color.rgb = NAVY
+    slide.background.fill.fore_color.rgb = SECTION_BG
 
     return slide
 
@@ -396,15 +404,15 @@ s = dark_slide()
 shape(s, MSO_SHAPE.OVAL, 9.3, -1.6, 6.2, 6.2, DEEP)
 shape(s, MSO_SHAPE.OVAL, 10.9, 3.6, 3.6, 3.6, DEEP2)
 textbox(s, 0.8, 1.5, 8.4, 0.4, "پایان‌نامه کارشناسی مهندسی کامپیوتر",
-        size=14, bold=True, color=AMBER)
+        size=14, bold=True, color=SECTION)
 textbox(s, 0.8, 2.05, 8.4, 1.9,
         ["تشخیص نوع ناهنجاری", "در ویدیوهای نظارتی"],
-        size=38, bold=True, color=WHITE, spacing=46)
+        size=38, bold=True, color=SECTION_FG, spacing=46)
 textbox(s, 0.8, 4.15, 8.4, 0.5,
         "یادگیری چندنمونه‌ای ضعیف‌نظارت با ستون فقرات ترنسفورمر ویدیویی",
         size=16, color=ICE)
 textbox(s, 0.8, 5.15, 3.0, 0.3, "ماکرو F1 نهایی", size=12, color=ICE)
-textbox(s, 0.8, 5.45, 3.0, 0.8, "0.4298", size=40, bold=True, color=AMBER,
+textbox(s, 0.8, 5.45, 3.0, 0.8, "0.4298", size=40, bold=True, color=SECTION,
         rtl=False, align=PP_ALIGN.LEFT)
 textbox(s, 4.0, 5.72, 3.2, 0.4, "از خط پایه 0.2975", size=13, color=ICE)
 textbox(s, 0.8, 6.6, 8.4, 0.35,
@@ -584,13 +592,13 @@ notes(s, "نظارت ضعیف یک معامله است: داده بیشتر با
 # =====================================================================
 s = dark_slide()
 shape(s, MSO_SHAPE.OVAL, -1.8, -1.5, 5.6, 5.6, DEEP)
-textbox(s, 5.0, 2.4, 7.5, 0.6, "مسیر اول", size=18, bold=True, color=AMBER)
-textbox(s, 5.0, 3.0, 7.5, 1.2, "X-CLIP", size=58, bold=True, color=WHITE,
+textbox(s, 5.0, 2.4, 7.5, 0.6, "مسیر اول", size=18, bold=True, color=SECTION)
+textbox(s, 5.0, 3.0, 7.5, 1.2, "X-CLIP", size=58, bold=True, color=SECTION_FG,
         rtl=False, align=PP_ALIGN.RIGHT)
 textbox(s, 5.0, 4.3, 7.5, 0.5, "تبدیل کد UMIL از دودویی به چهارده‌کلاسه",
         size=17, color=ICE)
 textbox(s, 5.0, 5.1, 7.5, 0.7, "0.3327  ←  0.3881", size=26, bold=True,
-        color=AMBER, rtl=False, align=PP_ALIGN.RIGHT)
+        color=SECTION, rtl=False, align=PP_ALIGN.RIGHT)
 notes(s, "مسیر اول روی کد UMIL بنا شد. ماکرو F1 از 0.3327 به 0.3881 رسید.")
 
 # =====================================================================
@@ -785,13 +793,13 @@ notes(s, "مسیر اول به 0.3881 رسید. دو دیوار ماند: هزی
 # =====================================================================
 s = dark_slide()
 shape(s, MSO_SHAPE.OVAL, -1.8, -1.5, 5.6, 5.6, DEEP)
-textbox(s, 5.0, 2.4, 7.5, 0.6, "مسیر دوم", size=18, bold=True, color=AMBER)
-textbox(s, 5.0, 3.0, 7.5, 1.2, "VideoMAE", size=58, bold=True, color=WHITE,
+textbox(s, 5.0, 2.4, 7.5, 0.6, "مسیر دوم", size=18, bold=True, color=SECTION)
+textbox(s, 5.0, 3.0, 7.5, 1.2, "VideoMAE", size=58, bold=True, color=SECTION_FG,
         rtl=False, align=PP_ALIGN.RIGHT)
 textbox(s, 5.0, 4.3, 7.5, 0.5, "رمزگذار منجمد و ویژگی‌های ذخیره‌شده",
         size=17, color=ICE)
 textbox(s, 5.0, 5.1, 7.5, 0.7, "0.2975  ←  0.4298", size=26, bold=True,
-        color=AMBER, rtl=False, align=PP_ALIGN.RIGHT)
+        color=SECTION, rtl=False, align=PP_ALIGN.RIGHT)
 notes(s, "مسیر دوم از صفر نوشته شد. ماکرو F1 از 0.2975 به 0.4298 رسید.")
 
 # =====================================================================
@@ -1136,7 +1144,7 @@ notes(s, "عدد قابل دفاع نهایی 0.4298 با بودجه ثابت و
 s = dark_slide()
 shape(s, MSO_SHAPE.OVAL, 10.2, -1.4, 5.0, 5.0, DEEP)
 textbox(s, 0.7, 0.55, 11.9, 0.7, "جمع‌بندی و کارهای آینده", size=29,
-        bold=True, color=WHITE)
+        bold=True, color=SECTION_FG)
 for index, (label, body, colour) in enumerate([
         ("دستاورد",
          "اصلاح سه اشکال بنیادی، بازطراحی معماری با رمزگذار منجمد، سر "
@@ -1151,7 +1159,7 @@ for index, (label, body, colour) in enumerate([
     shape(s, MSO_SHAPE.ROUNDED_RECTANGLE, 0.7, y, 11.9, 0.95, DEEP)
     textbox(s, 10.6, y + 0.16, 1.8, 0.4, label, size=15, bold=True,
             color=colour)
-    textbox(s, 1.0, y + 0.2, 9.4, 0.75, body, size=13, color=WHITE,
+    textbox(s, 1.0, y + 0.2, 9.4, 0.75, body, size=13, color=SECTION_FG,
             spacing=20)
 shape(s, MSO_SHAPE.ROUNDED_RECTANGLE, 0.7, 5.7, 11.9, 1.1, AMBER)
 textbox(s, 1.0, 5.92, 11.3, 0.7,
