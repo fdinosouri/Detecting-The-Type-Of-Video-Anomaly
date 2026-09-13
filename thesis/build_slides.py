@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """Build the Persian defence deck.
 
-    python3 thesis/build_slides.py
+    python3 thesis/build_slides.py            # navy, Defense_Slides.pptx
+    python3 thesis/build_slides.py --rose     # pink, Defense_Slides_Rose.pptx
+
+Two palettes, one layout. Every colour is a token in THEMES, so a style
+is a palette swap rather than a second copy of the deck.
 
 Written with python-pptx rather than pptxgenjs. The JavaScript library
 emits packages PowerPoint refuses to open — one slideMaster Override per
@@ -23,6 +27,7 @@ for l in open(sys.argv[1]) if len(l.split())>=3); \
 labels/UCF_std_test.txt
 """
 
+import sys
 from pathlib import Path
 
 from pptx import Presentation
@@ -30,27 +35,69 @@ from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.oxml.ns import qn
-from pptx.util import Emu, Inches, Pt
+from pptx.util import Inches, Pt
 
-OUTPUT = Path(__file__).resolve().parent / "Defense_Slides.pptx"
+HERE = Path(__file__).resolve().parent
 
-# ---- palette: night watch -------------------------------------------
-NAVY = RGBColor(0x16, 0x26, 0x4F)
-ICE = RGBColor(0xBF, 0xD4, 0xF2)
-AMBER = RGBColor(0xE8, 0xA3, 0x3D)
-TEAL = RGBColor(0x3F, 0xA7, 0xA0)
-RED = RGBColor(0xC9, 0x48, 0x3B)
-LIGHT = RGBColor(0xF6, 0xF8, 0xFC)
-INK = RGBColor(0x1B, 0x22, 0x36)
-MUTED = RGBColor(0x6A, 0x74, 0x8C)
+
+def _rgb(value):
+    return RGBColor(value >> 16, (value >> 8) & 0xFF, value & 0xFF)
+
+
+# NAVY carries the dark slides and headings, DEEP the shapes drawn on
+# them, ACCENT every highlight, GOOD the positive readings and WARN the
+# negative ones. LIGHT is the slide ground, CARD the tinted card fill,
+# BAND the table stripe and HILITE the marked table row.
+THEMES = {
+    "night": dict(
+        NAVY=0x16264F, DEEP=0x1E3566, ICE=0xBFD4F2, ACCENT=0xE8A33D,
+        GOOD=0x3FA7A0, WARN=0xC9483B, LIGHT=0xF6F8FC, INK=0x1B2236,
+        MUTED=0x6A748C, CARD=0xFFF7EA, COOL=0xEAF6F5, ALERT=0xFDEEEC,
+        BAND=0xEDF1F8, RULE=0xD9E0EC, HILITE=0xFFF2DC, ONACCENT=0x1B1300,
+        DEEP2=0x24427D, GOOD_TINT=0x7FD3CC,
+        ACCENT_TINT=0xF5C27A,
+        GRID=0xE4E9F2, AXIS=0xC7D0E0, FAINT=0x8FA6D4,
+    ),
+    "rose": dict(
+        NAVY=0x5E1F3F, DEEP=0x7C2E56, ICE=0xF6CFDE, ACCENT=0xD94F8C,
+        GOOD=0x4F8F87, WARN=0xC0394B, LIGHT=0xFDF7F9, INK=0x2A1822,
+        MUTED=0x8A6C78, CARD=0xFDECF2, COOL=0xE8F2F0, ALERT=0xFBE4E6,
+        BAND=0xF8EBF1, RULE=0xEAD5DF, HILITE=0xFCE1EC, ONACCENT=0xFFFFFF,
+        DEEP2=0x94396A, GOOD_TINT=0x8FD8CF,
+        ACCENT_TINT=0xF7A8C8,
+        GRID=0xF2E3EA, AXIS=0xDDC3D0, FAINT=0xD6A9BE,
+    ),
+}
+
+STYLE = "rose" if "--rose" in sys.argv else "night"
+_P = THEMES[STYLE]
+
+NAVY = _rgb(_P["NAVY"])
+DEEP = _rgb(_P["DEEP"])
+DEEP2 = _rgb(_P["DEEP2"])
+ICE = _rgb(_P["ICE"])
+AMBER = _rgb(_P["ACCENT"])
+TEAL = _rgb(_P["GOOD"])
+RED = _rgb(_P["WARN"])
+LIGHT = _rgb(_P["LIGHT"])
+INK = _rgb(_P["INK"])
+MUTED = _rgb(_P["MUTED"])
+CREAM = _rgb(_P["CARD"])
+MINT = _rgb(_P["COOL"])
+BLUSH = _rgb(_P["ALERT"])
+BAND = _rgb(_P["BAND"])
+RULE = _rgb(_P["RULE"])
+HILITE = _rgb(_P["HILITE"])
+ONACCENT = _rgb(_P["ONACCENT"])
+GRID = _rgb(_P["GRID"])
+AXIS = _rgb(_P["AXIS"])
+FAINT = _rgb(_P["FAINT"])
+GOOD_TINT = _rgb(_P["GOOD_TINT"])
+ACCENT_TINT = _rgb(_P["ACCENT_TINT"])
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
-CREAM = RGBColor(0xFF, 0xF7, 0xEA)
-MINT = RGBColor(0xEA, 0xF6, 0xF5)
-BLUSH = RGBColor(0xFD, 0xEE, 0xEC)
-BAND = RGBColor(0xED, 0xF1, 0xF8)
-RULE = RGBColor(0xD9, 0xE0, 0xEC)
-DEEP = RGBColor(0x1E, 0x35, 0x66)
-HILITE = RGBColor(0xFF, 0xF2, 0xDC)
+
+OUTPUT = HERE / ("Defense_Slides_Rose.pptx" if STYLE == "rose"
+                 else "Defense_Slides.pptx")
 
 FA = "Arial"
 
@@ -249,7 +296,7 @@ def notes(slide, text):
 # =====================================================================
 s = dark_slide()
 shape(s, MSO_SHAPE.OVAL, 9.3, -1.6, 6.2, 6.2, DEEP)
-shape(s, MSO_SHAPE.OVAL, 10.9, 3.6, 3.6, 3.6, RGBColor(0x24, 0x42, 0x7D))
+shape(s, MSO_SHAPE.OVAL, 10.9, 3.6, 3.6, 3.6, DEEP2)
 textbox(s, 0.8, 1.5, 8.4, 0.4, "پایان‌نامه کارشناسی مهندسی کامپیوتر",
         size=14, bold=True, color=AMBER)
 textbox(s, 0.8, 2.05, 8.4, 1.9,
@@ -264,7 +311,7 @@ textbox(s, 0.8, 5.45, 3.0, 0.8, "0.4298", size=40, bold=True, color=AMBER,
 textbox(s, 4.0, 5.72, 3.2, 0.4, "از خط پایه 0.2975", size=13, color=ICE)
 textbox(s, 0.8, 6.6, 8.4, 0.35,
         "دانشگاه صنعتی همدان  ·  گروه مهندسی کامپیوتر", size=12,
-        color=RGBColor(0x8F, 0xA6, 0xD4))
+        color=FAINT)
 notes(s, "پروژه تبدیل یک سامانه تشخیص ناهنجاری دودویی به سامانه "
          "چهارده‌کلاسه است. عدد نهایی ماکرو F1 برابر 0.4298 در برابر خط "
          "پایه 0.2975.")
@@ -857,12 +904,12 @@ def y_of(value):
 
 for level in (0.30, 0.35, 0.40, 0.45):
     shape(s, MSO_SHAPE.RECTANGLE, 1.45, y_of(level), 11.25, 0.02,
-          RGBColor(0xE4, 0xE9, 0xF2))
+          GRID)
     textbox(s, 0.6, y_of(level) - 0.14, 0.75, 0.28, f"{level:.2f}", size=10,
             color=MUTED, rtl=False, align=PP_ALIGN.RIGHT)
 
 shape(s, MSO_SHAPE.RECTANGLE, 1.45, BASE, 11.25, 0.025,
-      RGBColor(0xC7, 0xD0, 0xE0))
+      AXIS)
 
 for index, (label, value, colour) in enumerate([
         ("MLP / ViT-B", 0.2975, NAVY),
@@ -995,10 +1042,10 @@ textbox(s, 0.7, 0.55, 11.9, 0.7, "جمع‌بندی و کارهای آینده",
 for index, (label, body, colour) in enumerate([
         ("دستاورد",
          "اصلاح سه اشکال بنیادی، بازطراحی معماری با رمزگذار منجمد، سر "
-         "ترنسفورمر زمانی، و پروتکل ارزیابی با کف نوفه", TEAL),
+         "ترنسفورمر زمانی، و پروتکل ارزیابی با کف نوفه", GOOD_TINT),
         ("محدودیت",
          "رمزگذار به دامنه نظارتی تطبیق نمی‌یابد؛ مجموعه آزمون کوچک است "
-         "و بازه‌های اطمینان پهن", AMBER),
+         "و بازه‌های اطمینان پهن", ACCENT_TINT),
         ("کار آینده",
          "افزایش وضوح مکانی برای خوشه دزدی، تنظیم دقیق رمزگذار روی داده "
          "نظارتی، و تقسیم داده با سهم بزرگ‌تر برای آزمون", ICE)]):
@@ -1013,7 +1060,7 @@ textbox(s, 1.0, 5.92, 11.3, 0.7,
         "بیشترین اثر را نه یک ایده الگوریتمی، بلکه کاهش هزینه هر آزمایش "
         "داشت؛ و کمّی کردن نوفه پیش از تفسیر، از ادعاهایی جلوگیری کرد که "
         "داده پشتیبان آن‌ها نبود.", size=14, bold=True,
-        color=RGBColor(0x1B, 0x13, 0x00), spacing=21)
+        color=ONACCENT, spacing=21)
 notes(s, "سوال‌های محتمل: چرا رمزگذار را تنظیم دقیق نکردید، چرا عدد از "
          "مقالات پیشرفته پایین‌تر است، و از کجا معلوم آستانه روی تست "
          "تنظیم نشده.")
