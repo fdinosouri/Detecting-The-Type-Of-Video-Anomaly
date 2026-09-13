@@ -2,10 +2,21 @@
 """Build the Persian defence deck.
 
     python3 thesis/build_slides.py            # navy, Defense_Slides.pptx
-    python3 thesis/build_slides.py --rose     # pink, Defense_Slides_Rose.pptx
+    python3 thesis/build_slides.py --rose     # plum, Defense_Slides_Rose.pptx
 
-Two palettes, one layout. Every colour is a token in THEMES, so a style
-is a palette swap rather than a second copy of the deck.
+Two styles, one set of slides. THEMES holds the palette and a DARK flag,
+and the layout primitives branch on that flag, so the two differ in
+structure and not only in colour:
+
+    navy   light ground, kicker over the title, badged step numbers,
+           bordered white cards, a solid header band on every table
+    rose   plum ground throughout, kicker under the title, bare numerals
+           for steps, flat panels, tables ruled by row with the header
+           set in the accent rather than filled
+
+The rose style exists because the navy one reads as the common template
+for this kind of talk. Where a deck has to look unlike its neighbours,
+it is the structure that has to change, not the hue.
 
 Written with python-pptx rather than pptxgenjs. The JavaScript library
 emits packages PowerPoint refuses to open — one slideMaster Override per
@@ -54,18 +65,22 @@ THEMES = {
         GOOD=0x3FA7A0, WARN=0xC9483B, LIGHT=0xF6F8FC, INK=0x1B2236,
         MUTED=0x6A748C, CARD=0xFFF7EA, COOL=0xEAF6F5, ALERT=0xFDEEEC,
         BAND=0xEDF1F8, RULE=0xD9E0EC, HILITE=0xFFF2DC, ONACCENT=0x1B1300,
-        DEEP2=0x24427D, GOOD_TINT=0x7FD3CC,
-        ACCENT_TINT=0xF5C27A,
+        DEEP2=0x24427D, GOOD_TINT=0x7FD3CC, ACCENT_TINT=0xF5C27A,
+        DARK=False, TITLE=0x16264F, PANEL=0xFFFFFF, BAR=0x16264F,
         GRID=0xE4E9F2, AXIS=0xC7D0E0, FAINT=0x8FA6D4,
     ),
+    # A deck lit from the dark side: plum ground throughout, rose for
+    # every highlight, panels instead of cards, numerals instead of
+    # badges, and tables ruled rather than banded.
     "rose": dict(
-        NAVY=0x5E1F3F, DEEP=0x7C2E56, ICE=0xF6CFDE, ACCENT=0xD94F8C,
-        GOOD=0x4F8F87, WARN=0xC0394B, LIGHT=0xFDF7F9, INK=0x2A1822,
-        MUTED=0x8A6C78, CARD=0xFDECF2, COOL=0xE8F2F0, ALERT=0xFBE4E6,
-        BAND=0xF8EBF1, RULE=0xEAD5DF, HILITE=0xFCE1EC, ONACCENT=0xFFFFFF,
-        DEEP2=0x94396A, GOOD_TINT=0x8FD8CF,
-        ACCENT_TINT=0xF7A8C8,
-        GRID=0xF2E3EA, AXIS=0xDDC3D0, FAINT=0xD6A9BE,
+        DARK=True,
+        NAVY=0x220B18, DEEP=0x4A1B38, DEEP2=0x6B2750, ICE=0xF6CFDE,
+        ACCENT=0xFF6FA5, GOOD=0x7FD8C0, WARN=0xFF8A80,
+        LIGHT=0x2E1020, TITLE=0xFBEEF4, INK=0xF0DCE6, MUTED=0xB58FA2,
+        PANEL=0x3D1730, CARD=0x4A1B38, COOL=0x1F3A38, ALERT=0x4A1520,
+        BAND=0x361428, RULE=0x4A1B38, HILITE=0x5A1F3E, ONACCENT=0x2E1020,
+        GOOD_TINT=0x9FE6D2, ACCENT_TINT=0xFFA0C4,
+        GRID=0x45203A, AXIS=0x6B3352, FAINT=0x9C7186, BAR=0x7C3C63,
     ),
 }
 
@@ -92,6 +107,11 @@ ONACCENT = _rgb(_P["ONACCENT"])
 GRID = _rgb(_P["GRID"])
 AXIS = _rgb(_P["AXIS"])
 FAINT = _rgb(_P["FAINT"])
+TITLE = _rgb(_P["TITLE"])
+PANEL = _rgb(_P["PANEL"])
+DARK = _P["DARK"]
+ACCENT = AMBER          # the accent reads better by name in layout code
+BAR = _rgb(_P["BAR"])
 GOOD_TINT = _rgb(_P["GOOD_TINT"])
 ACCENT_TINT = _rgb(_P["ACCENT_TINT"])
 WHITE = RGBColor(0xFF, 0xFF, 0xFF)
@@ -182,12 +202,24 @@ def shape(slide, kind, x, y, w, h, fill, *, line=None):
     return item
 
 
-def card(slide, x, y, w, h, fill=WHITE, *, line=RULE):
+def card(slide, x, y, w, h, fill=None, *, line=RULE):
+    """A bordered card on the light design, a flat panel on the dark one."""
+    if fill is None:
+        fill = PANEL
+
     return shape(slide, MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h, fill,
-                 line=line)
+                 line=None if DARK else line)
 
 
 def dot(slide, x, y, number, fill=NAVY):
+    if DARK:
+        # no badge: the numeral carries the step on its own
+        tint = {NAVY: ICE, AMBER: ACCENT_TINT, RED: RED}.get(fill, fill)
+
+        return textbox(slide, x - 0.2, y - 0.1, 0.9, 0.62, str(number),
+                       size=27, bold=True, color=tint, rtl=False,
+                       align=PP_ALIGN.CENTER)
+
     circle = shape(slide, MSO_SHAPE.OVAL, x, y, 0.52, 0.52, fill)
     frame = circle.text_frame
     frame.word_wrap = False
@@ -201,11 +233,43 @@ def dot(slide, x, y, number, fill=NAVY):
     return circle
 
 
-def stat(slide, x, y, w, value, label, color=NAVY):
+def stat(slide, x, y, w, value, label, color=None):
+    color = TITLE if color is None else color
     textbox(slide, x, y, w, 0.8, value, size=38, bold=True, color=color,
             rtl=False, align=PP_ALIGN.CENTER)
     textbox(slide, x, y + 0.78, w, 0.5, label, size=12, color=MUTED,
             align=PP_ALIGN.CENTER)
+
+
+def _cell_lines(cell, *, horizontal, vertical):
+    """Set a cell's four borders; None means no line at all.
+
+    The default table style draws pale hairlines on every edge, which
+    turn into a harsh grid over a dark ground. Ruling only the rows
+    reads as a table without boxing every number in.
+    """
+    tcPr = cell._tc.get_or_add_tcPr()
+
+    for tag, colour in (("a:lnB", horizontal), ("a:lnT", horizontal),
+                        ("a:lnR", vertical), ("a:lnL", vertical)):
+        existing = tcPr.find(qn(tag))
+
+        if existing is not None:
+            tcPr.remove(existing)
+
+        line = tcPr.makeelement(qn(tag), {"w": "6350", "cap": "flat",
+                                          "cmpd": "sng", "algn": "ctr"})
+
+        if colour is None:
+            line.append(line.makeelement(qn("a:noFill"), {}))
+        else:
+            fill = line.makeelement(qn("a:solidFill"), {})
+            fill.append(fill.makeelement(qn("a:srgbClr"),
+                                         {"val": str(colour)}))
+            line.append(fill)
+
+        # lines precede the fill inside a:tcPr
+        tcPr.insert(0, line)
 
 
 def table(slide, x, y, w, head, rows, widths, *, row_h=0.3, size=11,
@@ -229,6 +293,9 @@ def table(slide, x, y, w, head, rows, widths, *, row_h=0.3, size=11,
     def fill_cell(cell, text, *, bold, color, background, align):
         cell.fill.solid()
         cell.fill.fore_color.rgb = background
+
+        if DARK:
+            _cell_lines(cell, horizontal=RULE, vertical=None)
         cell.margin_left = cell.margin_right = Inches(0.04)
         cell.margin_top = cell.margin_bottom = Inches(0.02)
         cell.vertical_anchor = MSO_ANCHOR.MIDDLE
@@ -242,17 +309,22 @@ def table(slide, x, y, w, head, rows, widths, *, row_h=0.3, size=11,
         _style_run(run, size if not bold or color != WHITE else head_size,
                    bold=bold, color=color)
 
+    head_colour = ACCENT if DARK else WHITE
+    head_fill = LIGHT if DARK else NAVY
+
     for index, title in enumerate(head):
-        fill_cell(tbl.cell(0, index), title, bold=True, color=WHITE,
-                  background=NAVY, align=PP_ALIGN.CENTER)
+        fill_cell(tbl.cell(0, index), title, bold=True, color=head_colour,
+                  background=head_fill, align=PP_ALIGN.CENTER)
 
     for r, row in enumerate(rows):
         marked = r in highlight
-        background = HILITE if marked else (WHITE if r % 2 else BAND)
+        plain = PANEL if r % 2 else BAND
+        background = HILITE if marked else plain
 
         for c, text in enumerate(row):
             fill_cell(tbl.cell(r + 1, c), text, bold=marked,
-                      color=NAVY if marked else INK, background=background,
+                      color=(ACCENT_TINT if DARK else NAVY) if marked else INK,
+                      background=background,
                       align=PP_ALIGN.RIGHT if c == 0 else PP_ALIGN.CENTER)
 
     return tbl
@@ -277,12 +349,12 @@ def light_slide(title, kicker=None):
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = LIGHT
 
-    if kicker:
-        textbox(slide, 0.6, 0.38, 12.1, 0.32, kicker, size=13, bold=True,
-                color=AMBER)
+    textbox(slide, 0.6, 0.45, 12.1, 0.8, title, size=29, bold=True,
+            color=TITLE)
 
-    textbox(slide, 0.6, 0.72 if kicker else 0.5, 12.1, 0.8, title, size=29,
-            bold=True, color=NAVY)
+    if kicker:
+        textbox(slide, 0.6, 1.24, 12.1, 0.32, kicker, size=12.5, bold=True,
+                color=AMBER)
 
     return slide
 
@@ -333,7 +405,7 @@ textbox(s, 7.15, 2.45, 5.2, 1.0,
         ["کدام نوع ناهنجاری رخ داده؟", "جواب: یکی از ۱۴ کلاس"], size=15,
         spacing=24)
 textbox(s, 0.6, 4.15, 12.1, 0.4, "چرا این تفاوت مهم است", size=18,
-        bold=True, color=NAVY)
+        bold=True, color=TITLE)
 bullets(s, 0.6, 4.65, 12.1, [
     "پاسخ عملیاتی به تصادف رانندگی، آمبولانس است؛ به سرقت مسلحانه، نیروی مسلح.",
     "یک هشدار خام «ناهنجاری رخ داد» برای اپراتور قابل اقدام نیست.",
@@ -352,7 +424,7 @@ stat(s, 6.8, 1.8, 2.9, "1895", "رمزگشایی موفق", TEAL)
 stat(s, 9.9, 1.8, 2.9, "5", "فایل خراب", RED)
 card(s, 0.6, 3.5, 5.9, 3.1)
 textbox(s, 0.95, 3.7, 5.2, 0.4, "ویژگی‌های داده", size=17, bold=True,
-        color=NAVY)
+        color=TITLE)
 bullets(s, 0.95, 4.2, 5.2, [
     "ویدیوی واقعی دوربین مداربسته، نه صحنه‌پردازی",
     "وضوح پایین، نور ضعیف، زاویه نامناسب",
@@ -395,7 +467,7 @@ table(s, 6.8, 1.75, 5.9, ["کلاس", "تعداد ویدیو"], [
 card(s, 0.6, 5.15, 12.1, 1.5, CREAM)
 textbox(s, 0.95, 5.35, 11.4, 0.4,
         "جمع: ۱۶۱۰ ویدیوی آموزش  ·  ۸۰۰ عادی و ۸۱۰ ناهنجار", size=16,
-        bold=True, color=NAVY)
+        bold=True, color=TITLE)
 textbox(s, 0.95, 5.8, 11.4, 0.7,
         "نسبت کلاس عادی به کمیاب‌ترین کلاس حدود ۳۰ به ۱ است. همین نسبت "
         "است که وزن‌دهی معکوس فراوانی را ضروری می‌کند.", size=12.5,
@@ -437,7 +509,7 @@ textbox(s, 8.6, 2.3, 3.8, 1.25,
         spacing=18)
 card(s, 8.3, 3.85, 4.4, 1.85)
 textbox(s, 8.6, 4.03, 3.8, 0.35, "چرا ارزیابی نوفه‌آلود است", size=15,
-        bold=True, color=NAVY)
+        bold=True, color=TITLE)
 textbox(s, 8.6, 4.43, 3.8, 1.2,
         "کلاس Assault تنها سه ویدیوی آزمون دارد. یک ویدیو یعنی یک‌سوم "
         "یادآوری آن کلاس، و ماکرو F1 به هر ۱۴ کلاس وزن یکسان می‌دهد.",
@@ -469,7 +541,7 @@ textbox(s, 7.4, 2.4, 5.0, 1.2,
         spacing=20)
 textbox(s, 0.6, 4.15, 12.1, 0.4,
         "راه حل: هر ویدیو یک کیف، هر قطعه یک نمونه", size=18, bold=True,
-        color=NAVY)
+        color=TITLE)
 for index, line in enumerate([
         "ویدیو به ۱۶ قطعه شکسته می‌شود",
         "مدل به هر قطعه نمره می‌دهد",
@@ -512,7 +584,7 @@ for index, (title, body) in enumerate([
     card(s, 0.6, y, 12.1, 1.05)
     dot(s, 11.9, y + 0.27, index + 1, AMBER if index == 3 else NAVY)
     textbox(s, 1.0, y + 0.14, 10.6, 0.35, title, size=15.5, bold=True,
-            color=NAVY)
+            color=TITLE)
     textbox(s, 1.0, y + 0.52, 10.6, 0.35, body, size=12.5, color=MUTED)
 textbox(s, 0.6, 6.65, 12.1, 0.4,
         "آن ۱۴ بردار متنی نقش وزن‌های طبقه‌بند را بازی می‌کنند و هرگز "
@@ -542,7 +614,7 @@ for index, (title, body, fix) in enumerate([
     card(s, x, 1.8, 3.85, 4.45)
     dot(s, x + 3.05, 2.05, index + 1, RED)
     textbox(s, x + 0.25, 2.75, 3.35, 0.75, title, size=15, bold=True,
-            color=NAVY, spacing=21)
+            color=TITLE, spacing=21)
     textbox(s, x + 0.25, 3.5, 3.35, 1.8, body, size=12, spacing=19)
     textbox(s, x + 0.25, 5.4, 3.35, 0.7, fix, size=12, bold=True,
             color=TEAL, spacing=18)
@@ -564,7 +636,7 @@ textbox(s, 0.95, 3.2, 5.2, 0.85,
         "چند ثانیه است", size=12, color=MUTED, spacing=19)
 card(s, 6.8, 1.75, 5.9, 2.5)
 textbox(s, 7.15, 1.95, 5.2, 0.4, "مرحله دوم: کدام نوع؟", size=17,
-        bold=True, color=NAVY)
+        bold=True, color=TITLE)
 textbox(s, 7.15, 2.4, 5.2, 0.8,
         "رأی‌گیری میانگین چهار قطعه برتر، تنها میان ۱۳ کلاس ناهنجار",
         size=13, spacing=20)
@@ -573,7 +645,7 @@ textbox(s, 7.15, 3.2, 5.2, 0.85,
         color=MUTED, spacing=19)
 textbox(s, 0.6, 4.5, 12.1, 0.4,
         "مثال عددی: ویدیوی سرقت، رویداد در قطعه‌های ۴ و ۵", size=16,
-        bold=True, color=NAVY)
+        bold=True, color=TITLE)
 table(s, 0.6, 5.0, 12.1,
       ["روش", "نمره", "در برابر آستانه ۰٫۵", "تصمیم"], [
           ["میانگین‌گیری روی ۸ قطعه", "0.26", "زیر آستانه", "عادی — غلط"],
@@ -602,7 +674,7 @@ textbox(s, 8.5, 2.95, 3.9, 1.3,
         "مدل روی درگیری شکست نخورده بود. یاد گرفته بود هرگز نگوید "
         "درگیری، چون گفتنش شرط‌بندی بدی بود.", size=12.5, spacing=19)
 textbox(s, 0.6, 4.6, 12.1, 0.4, "علت ریشه‌ای", size=17, bold=True,
-        color=NAVY)
+        color=TITLE)
 bullets(s, 0.6, 5.1, 12.1, [
     "تابع وزن‌دهی کلاس در کد وجود داشت ولی هیچ‌جا صدا زده نمی‌شد.",
     "وزن‌ها همه‌جا ۱٫۰ بودند؛ کلاس عادی حدود ۱۹ برابر کلاس درگیری گرادیان "
@@ -635,7 +707,7 @@ textbox(s, 6.7, 2.95, 5.7, 1.3,
         "تنها ۰٫۴۴ درمی‌آید.", size=12.5, spacing=19)
 textbox(s, 0.6, 4.6, 12.1, 0.4,
         "راه حل: توصیف بصری به‌جای اسم حقوقی", size=17, bold=True,
-        color=NAVY)
+        color=TITLE)
 card(s, 0.6, 5.1, 6.0, 1.4)
 textbox(s, 0.9, 5.25, 5.4, 0.3, "پیش از تغییر", size=12, color=MUTED)
 textbox(s, 0.9, 5.6, 5.4, 0.4, "\"Burglary\"", size=16, bold=True,
@@ -664,7 +736,7 @@ table(s, 0.6, 1.85, 12.1,
            "0.6419"],
       ], [4.9, 1.8, 1.8, 1.8, 1.8], row_h=0.44, size=12.5, highlight=(2,))
 textbox(s, 0.6, 3.95, 6.0, 0.4, "کلاس‌هایی که از مرگ برگشتند", size=16,
-        bold=True, color=NAVY)
+        bold=True, color=TITLE)
 table(s, 0.6, 4.45, 6.0, ["کلاس", "F1 پیش از تغییر", "F1 پس از تغییر"], [
     ["Arrest — بازداشت", "0.000", "0.556"],
     ["Abuse — سوءاستفاده", "0.462", "0.714"],
@@ -715,7 +787,7 @@ for index, (title, body) in enumerate([
     card(s, 0.6, y, 8.3, 0.95)
     dot(s, 8.1, y + 0.22, index + 1, AMBER if index == 3 else NAVY)
     textbox(s, 1.0, y + 0.1, 6.9, 0.32, title, size=15, bold=True,
-            color=NAVY)
+            color=TITLE)
     textbox(s, 1.0, y + 0.45, 6.9, 0.42, body, size=12, color=MUTED)
 card(s, 9.2, 1.8, 3.5, 4.4, CREAM)
 textbox(s, 9.5, 2.0, 2.9, 0.35, "تفاوت با X-CLIP", size=15, bold=True,
@@ -757,19 +829,19 @@ notes(s, "این تصمیم خودش نتیجه را بهتر نکرد. اجاز
 # =====================================================================
 s = light_slide("خط لوله نهایی", "مسیر دوم")
 for row, (boxes, caption, top) in enumerate([
-        ([("ویدیوی خام", "۹۰۰۰ فریم\n۴۰ مگابایت", NAVY),
-          ("۱۶ قطعه", "هر قطعه ۱۶ فریم\n۲۲۴ در ۲۲۴", NAVY),
+        ([("ویدیوی خام", "۹۰۰۰ فریم\n۴۰ مگابایت", TITLE),
+          ("۱۶ قطعه", "هر قطعه ۱۶ فریم\n۲۲۴ در ۲۲۴", TITLE),
           ("رمزگذار ViT-L", "منجمد\nیک بار اجرا", AMBER),
           ("ویژگی ذخیره‌شده", "۱۶ در ۱۰۲۴\n۶۴ کیلوبایت", TEAL)],
          "مرحله اول — یک بار برای ۱۸۹۵ ویدیو، ۱۵۰ دقیقه", 1.9),
-        ([("سر ترنسفورمر", "دو لایه توجه\nروی محور زمان", NAVY),
-          ("نمره هر قطعه", "۱۶ در ۱۴", NAVY),
+        ([("سر ترنسفورمر", "دو لایه توجه\nروی محور زمان", TITLE),
+          ("نمره هر قطعه", "۱۶ در ۱۴", TITLE),
           ("تصمیم دومرحله‌ای", "وجود، سپس نوع", AMBER),
           ("برچسب نهایی", "یکی از ۱۴ کلاس", TEAL)],
          "مرحله دوم — هر پیکربندی، ۸۰ ثانیه", 4.2)]):
     for index, (title, body, colour) in enumerate(boxes):
         x = 9.95 - index * 3.15
-        card(s, x, top, 2.8, 1.5, CREAM if index == 2 else WHITE)
+        card(s, x, top, 2.8, 1.5, CREAM if index == 2 else PANEL)
         textbox(s, x + 0.15, top + 0.2, 2.5, 0.35, title, size=14,
                 bold=True, color=colour, align=PP_ALIGN.CENTER)
         textbox(s, x + 0.15, top + 0.6, 2.5, 0.7, body, size=11.5,
@@ -803,7 +875,7 @@ textbox(s, 7.15, 2.45, 5.2, 1.4,
         "یک جدول ۱۶ در ۱۶ می‌گوید هر قطعه چقدر به هر قطعه دیگر توجه کند. "
         "بردار جدید هر قطعه، جمع وزن‌دار همه قطعه‌هاست.", size=13,
         spacing=20)
-textbox(s, 0.6, 4.35, 5.9, 0.35, "پیکربندی", size=16, bold=True, color=NAVY)
+textbox(s, 0.6, 4.35, 5.9, 0.35, "پیکربندی", size=16, bold=True, color=TITLE)
 table(s, 0.6, 4.8, 5.9, ["پارامتر", "مقدار"], [
     ["بعد پنهان", "512"],
     ["سرهای توجه", "4"],
@@ -811,7 +883,7 @@ table(s, 0.6, 4.8, 5.9, ["پارامتر", "مقدار"], [
     ["حذف تصادفی", "0.3"],
     ["پارامترها", "4,772,366"],
 ], [3.4, 2.5], row_h=0.3, size=11.5)
-textbox(s, 6.8, 4.35, 5.9, 0.35, "نتیجه", size=16, bold=True, color=NAVY)
+textbox(s, 6.8, 4.35, 5.9, 0.35, "نتیجه", size=16, bold=True, color=TITLE)
 table(s, 6.8, 4.8, 5.9, ["سر طبقه‌بند", "ماکرو F1، میانگین ۵ بذر"], [
     ["سر نقطه‌ای — خط پایه", "0.3049"],
     ["سر ترنسفورمر زمانی", "0.3480"],
@@ -841,9 +913,9 @@ textbox(s, 8.4, 2.5, 4.0, 1.5,
         "بهبود از ظرفیت مدل می‌آید، نه از وضوح مکانی بیشتر.", size=12.5,
         spacing=19)
 textbox(s, 0.6, 4.6, 12.1, 0.4, "چرا این تنها بهبود قطعی پروژه است",
-        size=17, bold=True, color=NAVY)
+        size=17, bold=True, color=TITLE)
 for x, title, value, colour, fill in [
-        (0.6, "بازه پنج بذر ViT-B", "0.310 — 0.354", RED, WHITE),
+        (0.6, "بازه پنج بذر ViT-B", "0.310 — 0.354", RED, PANEL),
         (4.7, "بازه پنج بذر ViT-L", "0.370 — 0.423", TEAL, MINT),
         (8.8, "آزمون من-ویتنی", "p = 1 / 252", AMBER, CREAM)]:
     card(s, x, 5.1, 3.9, 1.5, fill)
@@ -859,7 +931,7 @@ notes(s, "دو بازه هیچ همپوشانی ندارند. بدترین بذ�
 s = light_slide("آمیزش و تنظیم لاجیت", "مسیر دوم")
 card(s, 0.6, 1.8, 5.9, 2.15)
 textbox(s, 0.95, 1.98, 5.2, 0.35, "آمیزش در فضای ویژگی", size=16,
-        bold=True, color=NAVY)
+        bold=True, color=TITLE)
 textbox(s, 0.95, 2.42, 5.2, 1.4,
         "مدل تا دوره دهم زیان آموزش را تقریباً صفر می‌کرد، یعنی حفظ "
         "می‌کرد. ترکیب محدب دو ویدیو نمونه‌هایی می‌سازد که در داده نیستند.",
@@ -912,9 +984,9 @@ shape(s, MSO_SHAPE.RECTANGLE, 1.45, BASE, 11.25, 0.025,
       AXIS)
 
 for index, (label, value, colour) in enumerate([
-        ("MLP / ViT-B", 0.2975, NAVY),
-        ("+ Temporal", 0.3444, NAVY),
-        ("+ lr 3e-4", 0.3645, NAVY),
+        ("MLP / ViT-B", 0.2975, BAR),
+        ("+ Temporal", 0.3444, BAR),
+        ("+ lr 3e-4", 0.3645, BAR),
         ("+ ViT-L", 0.4122, AMBER),
         ("+ Mixup", 0.4161, AMBER),
         ("+ Logit adj.", 0.4298, AMBER)]):
@@ -981,7 +1053,7 @@ textbox(s, 8.5, 3.6, 3.9, 0.8,
         "اختلاف کمتر از این مقدار در ماکرو F1 روی این تقسیم از نوفه قابل "
         "تفکیک نیست.", size=12, spacing=18)
 textbox(s, 0.6, 4.7, 12.1, 0.4, "سقف تنظیم روی یک مجموعه آزمون کوچک",
-        size=17, bold=True, color=NAVY)
+        size=17, bold=True, color=TITLE)
 table(s, 0.6, 5.2, 4.6, ["تعداد ارزیابی", "تورم مورد انتظار"], [
     ["۸", "+0.069"],
     ["۵۰", "+0.095"],
