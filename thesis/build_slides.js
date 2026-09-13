@@ -11,6 +11,64 @@
 //
 const pptxgen = require("pptxgenjs");
 
+// ---------------------------------------------------------------------
+// pptxgenjs writes a third <c:axId> inside <c:barChart> that no axis
+// element declares. PowerPoint refuses the whole file over it ("found a
+// problem with content"), while LibreOffice, python-pptx and the XSD all
+// accept it, so it has to be repaired after writeFile rather than avoided
+// through chart options.
+// ---------------------------------------------------------------------
+const { execSync } = require("child_process");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+function stripOrphanAxisIds(pptxPath) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pptxfix-"));
+  const abs = path.resolve(pptxPath);
+  execSync(`unzip -q -o "${abs}" -d "${dir}"`);
+
+  const chartsDir = path.join(dir, "ppt", "charts");
+  let repaired = 0;
+
+  if (fs.existsSync(chartsDir)) {
+    for (const name of fs.readdirSync(chartsDir)) {
+      if (!name.endsWith(".xml")) continue;
+
+      const file = path.join(chartsDir, name);
+      const xml = fs.readFileSync(file, "utf8");
+
+      const declared = new Set();
+      const axisRe = /<c:(catAx|valAx|serAx|dateAx)>[\s\S]*?<c:axId val="(\d+)"\/>/g;
+      for (const m of xml.matchAll(axisRe)) declared.add(m[2]);
+
+      const fixed = xml.replace(
+        /<c:(\w*Chart)>[\s\S]*?<\/c:\1>/g,
+        block => block.replace(
+          /<c:axId val="(\d+)"\/>/g,
+          (tag, id) => (declared.has(id) ? tag : "")
+        )
+      );
+
+      if (fixed !== xml) {
+        fs.writeFileSync(file, fixed);
+        repaired += 1;
+      }
+    }
+  }
+
+  if (repaired) {
+    fs.rmSync(abs);
+    execSync(`cd "${dir}" && zip -q -X -r "${abs}" .`);
+  }
+
+  fs.rmSync(dir, { recursive: true, force: true });
+
+  return repaired;
+}
+
+
+
 const pres = new pptxgen();
 pres.layout = "LAYOUT_WIDE";           // 13.3 x 7.5
 pres.rtlMode = true;
@@ -1262,4 +1320,8 @@ function note(s, txt) { s.addNotes(txt); }
 }
 
 pres.writeFile({ fileName: "Defense_VideoAnomaly.pptx" })
-  .then(f => console.log("wrote " + f));
+  .then(f => {
+    const repaired = stripOrphanAxisIds(f);
+    console.log(`wrote ${f}` +
+                (repaired ? ` (repaired ${repaired} chart part(s))` : ""));
+  });
