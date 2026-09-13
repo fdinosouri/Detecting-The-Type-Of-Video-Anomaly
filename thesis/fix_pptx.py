@@ -31,6 +31,22 @@ AXIS = re.compile(rb'<c:(catAx|valAx|serAx|dateAx)>.*?<c:axId val="(\d+)"/>',
                   re.S)
 CHART_BLOCK = re.compile(rb'<c:(\w*Chart)>.*?</c:\1>', re.S)
 AX_ID = re.compile(rb'<c:axId val="(\d+)"/>')
+OVERRIDE = re.compile(rb'<Override PartName="([^"]+)"[^>]*/>')
+
+
+def drop_dangling_overrides(xml, parts):
+    """Remove `<Override>` entries naming a part the package lacks.
+
+    pptxgenjs writes one slideMaster override per slide while emitting a
+    single master, so a 25-slide deck declares 24 parts that do not
+    exist. That alone makes PowerPoint refuse to read the file.
+    """
+    def keep(match):
+        name = match.group(1).lstrip(b"/").decode()
+
+        return match.group(0) if name in parts else b""
+
+    return OVERRIDE.sub(keep, xml)
 
 
 def dedupe_shape_ids(xml):
@@ -76,12 +92,15 @@ def repair(path):
 
     with zipfile.ZipFile(path) as src:
         entries = src.infolist()
+        parts = {e.filename for e in entries if not e.is_dir()}
 
         with zipfile.ZipFile(temp, "w") as out:
             for item in entries:
                 data = src.read(item.filename)
 
-                if item.filename.startswith("ppt/slides/slide"):
+                if item.filename == "[Content_Types].xml":
+                    fixed = drop_dangling_overrides(data, parts)
+                elif item.filename.startswith("ppt/slides/slide"):
                     fixed = dedupe_shape_ids(data)
                 elif item.filename.startswith("ppt/charts/"):
                     fixed = strip_orphan_axis_ids(data)
@@ -110,6 +129,14 @@ def check(path):
     problems = []
 
     with zipfile.ZipFile(path) as z:
+        parts = {n for n in z.namelist() if not n.endswith("/")}
+
+        for name in OVERRIDE.findall(z.read("[Content_Types].xml")):
+            target = name.lstrip(b"/").decode()
+
+            if target not in parts:
+                problems.append(f"[Content_Types].xml: no such part {target}")
+
         for name in z.namelist():
             if not name.startswith("ppt/slides/slide"):
                 continue

@@ -1060,34 +1060,57 @@ function note(s, txt) { s.addNotes(txt); }
 {
   const s = lightSlide("مسیر بهبود، گام به گام", "مسیر دوم");
 
-  s.addChart(pres.ChartType.bar, [{
-    name: "macro F1",
-    labels: ["MLP / ViT-B", "+ Temporal", "+ lr 3e-4", "+ ViT-L",
-             "+ Mixup", "+ Logit adj."],
-    values: [0.2975, 0.3444, 0.3645, 0.4122, 0.4161, 0.4298],
-  }], {
-    x: 0.6, y: 1.8, w: 12.1, h: 3.6,
-    barDir: "col",
-    chartColors: [NAVY, NAVY, NAVY, AMBER, AMBER, AMBER],
-    showTitle: false,
-    showLegend: false,
-    showValue: true,
-    dataLabelPosition: "outEnd",
-    dataLabelColor: INK,
-    dataLabelFontSize: 11,
-    dataLabelFontFace: FA,
-    dataLabelFormatCode: "0.0000",
-    valAxisMinVal: 0.25,
-    valAxisMaxVal: 0.46,
-    valAxisLabelColor: MUTED,
-    catAxisLabelColor: INK,
-    valAxisLabelFontSize: 10,
-    catAxisLabelFontSize: 11,
-    valAxisLabelFontFace: FA,
-    catAxisLabelFontFace: FA,
-    valGridLine: { color: "E4E9F2", size: 1 },
-    catGridLine: { style: "none" },
-    barGapWidthPct: 55,
+  // Drawn with plain shapes rather than addChart: a native chart part
+  // brings its own XML plus an embedded workbook, and that is the one
+  // piece of this package PowerPoint has rejected. Rectangles cannot
+  // fail to open.
+  const steps = [
+    ["MLP / ViT-B", 0.2975, NAVY],
+    ["+ Temporal", 0.3444, NAVY],
+    ["+ lr 3e-4", 0.3645, NAVY],
+    ["+ ViT-L", 0.4122, AMBER],
+    ["+ Mixup", 0.4161, AMBER],
+    ["+ Logit adj.", 0.4298, AMBER],
+  ];
+
+  const BASE = 5.30;        // y of the baseline
+  const TOP = 1.95;         // y of the top gridline
+  const LO = 0.25, HI = 0.46;
+  const yOf = v => BASE - (v - LO) / (HI - LO) * (BASE - TOP);
+
+  [0.30, 0.35, 0.40, 0.45].forEach(v => {
+    s.addShape(pres.ShapeType.rect, {
+      x: 1.45, y: yOf(v), w: 11.25, h: 0.02,
+      fill: { color: "E4E9F2" }, line: { color: "E4E9F2", width: 0 },
+    });
+    s.addText(v.toFixed(2), ltr({
+      x: 0.6, y: yOf(v) - 0.14, w: 0.75, h: 0.28, fontSize: 10,
+      color: MUTED, align: "right", margin: 0,
+    }));
+  });
+
+  s.addShape(pres.ShapeType.rect, {
+    x: 1.45, y: BASE, w: 11.25, h: 0.025,
+    fill: { color: "C7D0E0" }, line: { color: "C7D0E0", width: 0 },
+  });
+
+  steps.forEach(([label, value, colour], i) => {
+    const slot = 11.25 / steps.length;
+    const x = 1.45 + i * slot + (slot - 1.30) / 2;
+    const top = yOf(value);
+
+    s.addShape(pres.ShapeType.rect, {
+      x, y: top, w: 1.30, h: BASE - top,
+      fill: { color: colour }, line: { width: 0 },
+    });
+    s.addText(value.toFixed(4), ltr({
+      x: x - 0.25, y: top - 0.34, w: 1.80, h: 0.3, fontSize: 11,
+      color: INK, bold: true, align: "center", margin: 0,
+    }));
+    s.addText(label, ltr({
+      x: x - 0.35, y: BASE + 0.1, w: 2.0, h: 0.3, fontSize: 11,
+      color: INK, align: "center", margin: 0,
+    }));
   });
 
   stat(s, 0.6, 5.6, 3.9, "+0.1323", "بهبود مطلق ماکرو F1", TEAL);
