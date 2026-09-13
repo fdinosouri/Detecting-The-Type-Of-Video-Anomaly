@@ -11,101 +11,6 @@
 //
 const pptxgen = require("pptxgenjs");
 
-// ---------------------------------------------------------------------
-// Two pptxgenjs defects make PowerPoint reject the package with "found a
-// problem with content". LibreOffice, python-pptx and the XSD all accept
-// both, so neither shows up before the file reaches PowerPoint.
-//
-//   1. Tables are numbered from a different counter than the other
-//      shapes, so a slide holding both can emit two <p:cNvPr> elements
-//      with the same id. Shape ids must be unique within a slide.
-//   2. <c:barChart> lists three <c:axId> children while only two axis
-//      elements are declared; the third id resolves to nothing.
-//
-// Neither is reachable through the library's options, so both are
-// repaired in the written file, which is then repacked as a valid OPC
-// package: [Content_Types].xml first, no directory entries.
-// ---------------------------------------------------------------------
-const { execSync } = require("child_process");
-const fs = require("fs");
-const os = require("os");
-const path = require("path");
-
-function dedupeShapeIds(xml) {
-  const used = new Set();
-  let next = 1;
-
-  return xml.replace(/<p:cNvPr id="(\d+)"/g, (tag, id) => {
-    if (!used.has(id)) {
-      used.add(id);
-      return tag;
-    }
-
-    while (used.has(String(next))) next += 1;
-    used.add(String(next));
-
-    return tag.replace(`id="${id}"`, `id="${next}"`);
-  });
-}
-
-function stripOrphanAxisIds(xml) {
-  const declared = new Set();
-  const axisRe = /<c:(catAx|valAx|serAx|dateAx)>[\s\S]*?<c:axId val="(\d+)"\/>/g;
-  for (const m of xml.matchAll(axisRe)) declared.add(m[2]);
-
-  return xml.replace(
-    /<c:(\w*Chart)>[\s\S]*?<\/c:\1>/g,
-    block => block.replace(
-      /<c:axId val="(\d+)"\/>/g,
-      (tag, id) => (declared.has(id) ? tag : "")
-    )
-  );
-}
-
-function repairPackage(pptxPath) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pptxfix-"));
-  const abs = path.resolve(pptxPath);
-  execSync(`unzip -q -o "${abs}" -d "${dir}"`);
-
-  let repaired = 0;
-
-  const pass = (subdir, fix) => {
-    const full = path.join(dir, "ppt", subdir);
-    if (!fs.existsSync(full)) return;
-
-    for (const name of fs.readdirSync(full)) {
-      if (!name.endsWith(".xml")) continue;
-
-      const file = path.join(full, name);
-      const xml = fs.readFileSync(file, "utf8");
-      const fixed = fix(xml);
-
-      if (fixed !== xml) {
-        fs.writeFileSync(file, fixed);
-        repaired += 1;
-      }
-    }
-  };
-
-  pass("slides", dedupeShapeIds);
-  pass("charts", stripOrphanAxisIds);
-
-  if (repaired) {
-    // An OPC package must open with [Content_Types].xml and must carry no
-    // directory entries. "zip -r ." satisfies neither, and PowerPoint
-    // rejects the result even though every part inside it is valid.
-    fs.rmSync(abs);
-    execSync(`cd "${dir}" && zip -q -X -D "${abs}" "[Content_Types].xml" `
-             + `&& zip -q -X -D -r "${abs}" . -x "[Content_Types].xml"`);
-  }
-
-  fs.rmSync(dir, { recursive: true, force: true });
-
-  return repaired;
-}
-
-
-
 const pres = new pptxgen();
 pres.layout = "LAYOUT_WIDE";           // 13.3 x 7.5
 pres.rtlMode = true;
@@ -1358,7 +1263,12 @@ function note(s, txt) { s.addNotes(txt); }
 
 pres.writeFile({ fileName: "Defense_VideoAnomaly.pptx" })
   .then(f => {
-    const repaired = repairPackage(f);
-    console.log(`wrote ${f}` +
-                (repaired ? ` (repaired ${repaired} part(s))` : ""));
+    // pptxgenjs emits duplicate shape ids and an undeclared chart axis
+    // id; PowerPoint refuses the file over either. fix_pptx.py repairs
+    // both in place and re-checks.
+    const { execSync } = require("child_process");
+    const path = require("path");
+    execSync(`python3 "${path.join(__dirname, "fix_pptx.py")}" "${f}"`,
+             { stdio: "inherit" });
+    console.log("wrote " + f);
   });
