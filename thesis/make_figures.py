@@ -45,11 +45,19 @@ def _style():
 
 
 def _save(fig, name):
+    """Write the raster the document embeds, and a vector twin beside it.
+
+    Word takes the PNG. The SVG is there so a figure can still be edited
+    after the fact without re-running anything: PowerPoint turns it into
+    real shapes through Insert > Picture, then Convert to Shape, and
+    Illustrator or Inkscape open it directly.
+    """
     OUT.mkdir(parents=True, exist_ok=True)
     path = OUT / name
     fig.savefig(path, dpi=DPI, bbox_inches="tight")
+    fig.savefig(path.with_suffix(".svg"), bbox_inches="tight")
     plt.close(fig)
-    print(f"  {path.name}")
+    print(f"  {path.name}  +  {path.with_suffix('.svg').name}")
 
 
 def _box(ax, x, y, w, h, text, face="#eef3f7", edge=ACCENT, size=8):
