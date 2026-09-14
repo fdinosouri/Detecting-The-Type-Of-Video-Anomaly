@@ -183,6 +183,7 @@ def chart(slide, kind, x, y, w, h, categories, series, *, colors=None,
                 fill.solid()
                 fill.fore_color.rgb = colour
 
+    graphic.chart.has_title = False
     graphic.chart.has_legend = legend
 
     if legend:
@@ -195,6 +196,37 @@ def chart(slide, kind, x, y, w, h, categories, series, *, colors=None,
         axis.tick_labels.font.color.rgb = INK
 
     return graphic.chart
+
+
+def baseline(slide, value, chart_top, chart_height, scale_max, text):
+    """A reference line across a chart, as a shape you can drag.
+
+    PowerPoint has no reference-line object, and a second series would have
+    to be a different chart type -- a combination chart python-pptx cannot
+    build. A plain line is the honest substitute: it is placed from the
+    axis scale, and if it sits a hair off after a resize you nudge it.
+
+    PLOT_TOP and PLOT_BOTTOM are where the plotted area falls inside the
+    frame once the category labels are taken off the bottom.
+    """
+    PLOT_TOP, PLOT_BOTTOM = 0.035, 0.924
+
+    span = chart_height * (PLOT_BOTTOM - PLOT_TOP)
+    y = chart_top + chart_height * PLOT_TOP + span * (1 - value / scale_max)
+
+    rule = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, Inches(1.35), Inches(y), Inches(10.9),
+        Pt(1.25),
+    )
+    rule.fill.solid()
+    rule.fill.fore_color.rgb = ACCENT2
+    rule.line.fill.background()
+    rule.shadow.inherit = False
+
+    label(slide, 1.45, y - 0.34, 5.0, text, size=10, color=ACCENT2,
+          align=PP_ALIGN.LEFT)
+
+    return rule
 
 
 def hide_series(chart_obj, index):
@@ -313,15 +345,33 @@ def fig_two_stage(deck):
 def fig_macro_f1_progress(deck):
     slide = slide_new(deck, "شکل ۳-۱  روند ماکرو اف‑یک در طول مراحل پروژه")
 
-    chart(slide, XL_CHART_TYPE.COLUMN_CLUSTERED, 0.9, 1.2, 11.5, 4.9,
-          ["MLP head, ViT-B", "temporal head, ViT-B", "+ lr 3e-4",
-           "+ ViT-L features", "+ mixup 0.2 + logit adjust"],
-          [("macro F1", (0.2975, 0.3444, 0.3645, 0.4122, 0.4298))],
-          colors=[ACCENT])
+    top, height = 1.2, 4.6
+    progress = chart(
+        slide, XL_CHART_TYPE.COLUMN_CLUSTERED, 0.9, top, 11.5, height,
+        ["MLP head, ViT-B", "temporal head, ViT-B", "+ lr 3e-4",
+         "+ ViT-L features", "+ mixup 0.2 + logit adjust"],
+        [("macro F1", (0.2975, 0.3444, 0.3645, 0.4122, 0.4298))],
+        colors=[MUTED],
+    )
 
-    label(slide, 0.9, 6.25, 11.5,
-          "X-CLIP fine-tuned reached 0.3881 on its own split",
-          italic=True, color=ACCENT2)
+    # the two steps that carried the result get their own colour, as in the
+    # report: everything before them is one grey run
+    point_colours = {3: ACCENT, 4: ACCENT2}
+    series = progress.plots[0].series[0]
+
+    for index, colour in point_colours.items():
+        fill = series.points[index].format.fill
+        fill.solid()
+        fill.fore_color.rgb = colour
+
+    # a fixed scale makes the baseline's position arithmetic rather than
+    # guesswork, so the line below lands where the value says it does
+    axis = progress.value_axis
+    axis.minimum_scale = 0.0
+    axis.maximum_scale = 0.5
+
+    baseline(slide, 0.3881, top, height, axis.maximum_scale,
+             "X-CLIP fine-tuned  0.3881")
 
 
 def fig_backbone_compare(deck):

@@ -185,8 +185,10 @@ def macro_f1_progress():
                 f"{v:.4f}", ha="center", fontsize=8.5)
 
     ax.axhline(0.3881, color=ACCENT2, linestyle="--", linewidth=1)
-    ax.text(4.42, 0.3905, "X-CLIP fine-tuned\n(0.3881)", fontsize=7.5,
-            color=ACCENT2, va="bottom", ha="right")
+    # anchored over the first bar: at the right-hand end this label landed
+    # on top of the 0.4298 above the last bar and both became unreadable
+    ax.text(-0.36, 0.3925, "X-CLIP fine-tuned (0.3881)", fontsize=7.5,
+            color=ACCENT2, va="bottom", ha="left")
 
     ax.set_ylabel("macro F1")
     ax.set_ylim(0, 0.50)
